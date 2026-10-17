@@ -1,0 +1,38 @@
+[
+  {
+    "sample": 1,
+    "split": "train",
+    "image": "sample_01.png",
+    "findings": "- Phổi hai bên kém sáng, mờ kính rải rác, rốn phổi tăng đậm nhẹ.\n- Bờ vòm hoành hai bên đều, hai góc sườn hoành nhọn.\n- Bóng mờ tim không to, các cung tim trong giới hạn sinh lý.",
+    "impressions": "- Hình ảnh nghĩ nhiều đến tổn thương phổi kẽ.",
+    "Ages": "62",
+    "view": "PA",
+    "Ghi chú": "Chụp Xquang ngực thẳng",
+    "Kỹ thuật": "Chụp Xquang tim phổi thẳng",
+    "sex": "Nữ"
+  },
+  {
+    "sample": 2,
+    "split": "train",
+    "image": "sample_02.png",
+    "findings": "- Phổi hai bên kém sáng, đám mờ không đều thùy trên phổi trái, vài nốt vôi hóa nhỏ kèm xơ hóa vùng đỉnh phổi hai bên, rốn phổi tăng đậm nhẹ.\n- Bờ vòm hoành hai bên đều, hai góc sườn hoành nhọn.\n- Bóng mờ tim không to, các cung tim trong giới hạn sinh lý.",
+    "impressions": "- Hình ảnh đám mờ không đều thùy trên phổi trái.\n- vài nốt vôi hóa nhỏ kèm xơ hóa vùng đỉnh phổi hai bên.",
+    "Ages": "69",
+    "view": "PA",
+    "Ghi chú": "Chụp Xquang ngực thẳng",
+    "Kỹ thuật": "Chụp Xquang tim phổi thẳng",
+    "sex": "Nữ"
+  },
+  {
+    "sample": 3,
+    "split": "train",
+    "image": "sample_03.png",
+    "findings": "- Lồng ngực cân đối không thấy bất thường xương\n- Dày tổ chức kẽ kèm mờ kính rải rác hai phổi\n- Bờ vòm hoành hai bên đều. Góc sườn hoành hai bên nhọn\n- Bóng tim không to. Các bờ trung thất trong giới hạn bình thường.",
+    "impressions": "- Hình ảnh tổn thương phổi kẽ.",
+    "Ages": "61",
+    "view": "PA",
+    "Ghi chú": "Chụp Xquang ngực thẳng",
+    "Kỹ thuật": "Chụp Xquang tim phổi thẳng",
+    "sex": "Nam"
+  }
+]

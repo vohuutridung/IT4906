@@ -216,3 +216,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Downloaded dataset shards are large and should be fetched with data/med_findings_gen/download_data.py.
+data/med_findings_gen/VNMedical_bv175/data/*.parquet
+data/med_findings_gen/VNMedical_bv175/.cache/
+data/cls/
