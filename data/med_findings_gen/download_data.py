@@ -1,4 +1,4 @@
-"""Download the VNMedical_bv175 dataset into data/VNMedical_bv175/."""
+"""Download the VNMedical_bv175 dataset into data/med_findings_gen/VNMedical_bv175/."""
 
 from pathlib import Path
 
