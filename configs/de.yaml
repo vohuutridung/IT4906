@@ -1,0 +1,46 @@
+# EvoPrompt DE — Medical Findings Generation (Stage 1, paper ViX-Ray)
+# Mọi tham số quan trọng đều ở đây — các mục ghi "chốt tạm" đổi được 1 dòng.
+
+seed: 5  # official default (set_seed toàn cục: random + numpy + torch)
+
+data:
+  # Chạy local: giữ nguyên. Trên Kaggle: đổi thành /kaggle/input/vnmedical-bv175
+  dataset_dir: "data/med_findings_gen/VNMedical_bv175"
+  split: "val"
+  num_samples: 200  # 200 sample ĐẦU của val (thứ tự parquet gốc — cần xác nhận nhóm)
+
+target_llm:  # Model nhỏ sinh Findings để đánh giá prompt
+  model_id: "google/medgemma-1.5-4b-it"
+  batch_size: 16          # official default
+  max_new_tokens: 128     # official default
+  # ⚠️ T4 (Kaggle) KHÔNG hỗ trợ bfloat16 -> dùng float16. L4/A100 -> bfloat16.
+  dtype: "float16"
+  do_sample: false        # greedy cho đánh giá (nếu nhóm xác định official dùng sampling thì đổi)
+
+fitness:  # 0.7 × BERTScore + 0.3 × ROUGE-L — chốt tạm 2026-11-10, SWAPPABLE
+  bertscore_model: "xlm-roberta-large"  # đổi model khác chỉ cần sửa dòng này + re-score cache
+  bertscore_lang: null                  # đặt "vi" nếu muốn dùng rescale baseline theo lang
+  rouge_type: "rougeL"
+  rouge_use_stemmer: false              # stemmer chỉ hỗ trợ tiếng Anh
+  weight_bertscore: 0.7
+  weight_rouge: 0.3
+  batch_size: 32
+
+evolution_llm:  # Model lớn lai ghép + đột biến prompt
+  model_id: "google/medgemma-27b-text-it"  # ⚠️ chốt repo chính xác với nhóm
+  load_in_4bit: true     # bắt buộc cho Kaggle 2×T4 (16GB/GPU)
+  bnb_compute_dtype: "float16"  # T4: float16; A100/L4: bfloat16
+  dtype: "bfloat16"      # chỉ dùng khi load_in_4bit=false
+  max_new_tokens: 1000   # official default
+  temperature: 0.5       # official default
+  top_p: 0.95            # official default (nucleus)
+
+de:
+  population_size: 10    # N — theo file TTTH
+  iterations: 10         # T — theo file TTTH, không early stopping
+  initial_mode: "topk"   # CHỐT TẠM: P₀ = top-10 fitness của pool 20 (script mẫu repo dùng para_topk)
+  donor_random: false    # Prompt 3 = best prompt (theo file TTTH + code gốc template v1)
+  pool_files:            # ✅ CHỐT: trộn CẢ 2 FILE (khớp code gốc --initial all)
+    - "data/med_findings_gen/prompts.txt"
+    - "data/med_findings_gen/prompts_auto.txt"
+  cache_dir: "runs/de"   # checkpoint + cache; Kaggle: /kaggle/working/runs/de
