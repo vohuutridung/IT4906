@@ -3,8 +3,8 @@
 Chốt tạm 2026-11-10 (swappable qua config — ưu tiên đổi được model để so sánh sau):
 - BERTScore model: xlm-roberta-large (multilingual cho tiếng Việt, không cần word segmentation)
 - ROUGE-L: F1 (rouge-score, use_stemmer=False)
-Cache fitness theo (prompt_text + fingerprint cấu hình metric) => đổi metric/model
-chỉ re-score, KHÔNG chạy lại target LLM (cache generation độc lập với metric).
+Cache fitness theo (số sample + prompt_text + fingerprint cấu hình metric) => đổi
+metric/model chỉ re-score, KHÔNG chạy lại target LLM (cache generation độc lập với metric).
 """
 
 from __future__ import annotations
@@ -25,6 +25,7 @@ def _metric_fingerprint(cfg: dict) -> str:
             "use_stemmer": bool(cfg.get("rouge_use_stemmer", False)),
             "w_bertscore": cfg.get("weight_bertscore", 0.7),
             "w_rouge": cfg.get("weight_rouge", 0.3),
+            "bertscore_bf16": bool(cfg.get("bertscore_bf16", False)),
         },
         sort_keys=True,
         ensure_ascii=False,
@@ -41,6 +42,8 @@ class FitnessEvaluator:
         self.w_bertscore: float = float(cfg.get("weight_bertscore", 0.7))
         self.w_rouge: float = float(cfg.get("weight_rouge", 0.3))
         self.batch_size: int = int(cfg.get("batch_size", 32))
+        self.bertscore_bf16: bool = bool(cfg.get("bertscore_bf16", False))
+        self.device_cfg: str | None = cfg.get("device")  # VD "cuda:1"; None = tự chọn
         self._bertscore = None  # lazy: nạp khi lần đầu tính
         self._rouge = rouge_scorer.RougeScorer([self.rouge_type], use_stemmer=self.use_stemmer)
         self.fp = _metric_fingerprint(cfg)
@@ -52,19 +55,58 @@ class FitnessEvaluator:
 
     def _ensure_bertscore(self):
         if self._bertscore is None:
+            import torch
             from bert_score import BERTScorer
 
             kwargs: dict = {"model_type": self.bertscore_model, "batch_size": self.batch_size}
             if self.bertscore_lang:
                 kwargs["lang"] = self.bertscore_lang
-            self._bertscore = BERTScorer(**kwargs)
+            device = self.device_cfg or self._auto_device()
+            try:
+                self._bertscore = BERTScorer(**kwargs, device=device)
+                if device != "cpu" and self.bertscore_bf16:
+                    # bf16: nhả ~1GiB VRAM trên GPU chung với 27B (OOM thật 2026-11-11:
+                    # 27B prefill thiếu 66MiB vì GPU 1 đặc). F1 lệch <0.5% và lệch
+                    # ĐỒNG NHẤT với mọi prompt → công bằng cho so sánh DE.
+                    self._bertscore._model.to(torch.bfloat16)
+            except torch.OutOfMemoryError:
+                print(
+                    f"[fitness] OOM trên {device} → BERTScore chuyển sang CPU "
+                    "(chậm hơn nhưng vẫn chạy)"
+                )
+                self._bertscore = BERTScorer(**kwargs, device="cpu")
         return self._bertscore
+
+    @staticmethod
+    def _auto_device() -> str:
+        """GPU0 thường đã chứa target LLM + một phần evolution model → ưu tiên GPU1."""
+        import torch
+
+        n = torch.cuda.device_count()
+        if n >= 2:
+            return "cuda:1"
+        return "cuda" if n == 1 else "cpu"
 
     def score(self, prompt_text: str, cands: list[str], refs: list[str]) -> dict:
         """Trả {"bertscore_f1", "rougeL_f1", "fitness"} đã cache theo prompt."""
-        k = hashlib.sha1(prompt_text.encode("utf-8")).hexdigest()
+        # Key PHẢI gồm len(refs) (= số dev sample): khoá cũ chỉ sha1(prompt) khiến fitness
+        # chấm trên thang 100 sample được tái dùng âm thầm cho run dev 200 (poison vector
+        # 2026-11-13). Đổi num_samples → key đổi → tự re-score từ gen cache (vài phút),
+        # không bao giờ trộn 2 thang đo vào cùng bảng xếp hạng.
+        k = hashlib.sha1(f"{len(refs)}||{prompt_text}".encode("utf-8")).hexdigest()
         if k in self.cache:
             return self.cache[k]
+        # Output rỗng (model không sinh chữ nào) phải bị chấm THẤP chứ không làm crash:
+        # bert_score với chuỗi rỗng gọi tokenizer.build_inputs_with_special_tokens —
+        # API mà transformers 5.x đã gỡ bỏ → AttributeError. Thay placeholder để điểm tự thấp.
+        n_empty = sum(1 for c in cands if not (c and c.strip()))
+        if n_empty:
+            print(
+                f"[fitness] cảnh báo: {n_empty}/{len(cands)} output rỗng → chấm thấp "
+                f"(prompt: {prompt_text[:60]}...)"
+            )
+        cands = [c if (c and c.strip()) else "(trống)" for c in cands]
+        refs = [r if (r and r.strip()) else "(trống)" for r in refs]
         bert = self._ensure_bertscore()
         _, _, bf1 = bert.score(cands, refs)
         bertscore_f1 = float(bf1.mean().item())

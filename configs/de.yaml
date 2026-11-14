@@ -11,10 +11,11 @@ data:
 
 target_llm:  # Model nhỏ sinh Findings để đánh giá prompt
   model_id: "google/medgemma-1.5-4b-it"
-  batch_size: 16          # official default
+  batch_size: 4           # T4 + bf16: KV cache lớn theo batch — 4 an toàn VRAM (GPU ≥24GB có thể trả lại 16)
   max_new_tokens: 128     # official default
-  # ⚠️ T4 (Kaggle) KHÔNG hỗ trợ bfloat16 -> dùng float16. L4/A100 -> bfloat16.
-  dtype: "float16"
+  # ⚠️ T4 KHÔNG chạy được fp16 cho MedGemma/Gemma3 (logits NaN → output rỗng — đã chẩn đoán 2026-11-11).
+  # bf16 emulated trên T4 chạy ĐÚNG (đã test thực tế). L4/A100 → bf16 native.
+  dtype: "bfloat16"
   do_sample: false        # greedy cho đánh giá (nếu nhóm xác định official dùng sampling thì đổi)
 
 fitness:  # 0.7 × BERTScore + 0.3 × ROUGE-L — chốt tạm 2026-11-10, SWAPPABLE
@@ -24,14 +25,20 @@ fitness:  # 0.7 × BERTScore + 0.3 × ROUGE-L — chốt tạm 2026-11-10, SWAPP
   rouge_use_stemmer: false              # stemmer chỉ hỗ trợ tiếng Anh
   weight_bertscore: 0.7
   weight_rouge: 0.3
-  batch_size: 32
+  batch_size: 16                        # giảm để an toàn VRAM khi chung GPU với model khác
+  bertscore_bf16: true                  # nhả ~1GiB VRAM GPU1 cho 27B; F1 lệch <0.5% (đồng nhất mọi prompt); đổi → fingerprint tự tách cache
+  # device: "cuda:1"                    # để trống = tự chọn (≥2 GPU → cuda:1; OOM → tự rơi về CPU)
 
 evolution_llm:  # Model lớn lai ghép + đột biến prompt
   model_id: "google/medgemma-27b-text-it"  # ⚠️ chốt repo chính xác với nhóm
   load_in_4bit: true     # bắt buộc cho Kaggle 2×T4 (16GB/GPU)
-  bnb_compute_dtype: "float16"  # T4: float16; A100/L4: bfloat16
+  bnb_compute_dtype: "bfloat16"  # fp16 gây NaN cho Gemma3 (đã chẩn đoán 2026-11-11); T4 chạy bf16 emulated OK
   dtype: "bfloat16"      # chỉ dùng khi load_in_4bit=false
-  max_new_tokens: 1000   # official default
+  max_new_tokens: 1500   # ⚠️ LỆCH official 1000 — cần báo nhóm. 2026-11-12: 27B trích dẫn
+                         # nguyên văn donors trong 4 bước → trần 1000 cắt TRƯỚC thẻ
+                         # <prompt> → fallback = text phân tích (offspring rác 0.58).
+                         # Template cấm trích-dẫn + trần 1500; VRAM an toàn: sliding_window
+                         # 1024 chặn KV ~0.65GiB, không tăng theo độ dài decode.
   temperature: 0.5       # official default
   top_p: 0.95            # official default (nucleus)
 

@@ -2,9 +2,15 @@
 
 Instruction 4 bước nguyên văn EvoPrompt (Proposal slide 9):
 Difference extraction -> Mutation -> Combine (với Prompt 3) -> Crossover (với Basic Prompt).
-Decode: temperature 0.5, top_p 0.95, max_tokens 1000.
+Decode: temperature 0.5, top_p 0.95, max_tokens 1500 (lệch official 1000 — CẦN BÁO NHÓM;
+2026-11-12: 27B trích dẫn nguyên văn donors trong 4 bước → trần 1000 cắt TRƯỚC thẻ
+<prompt> → fallback = text phân tích → offspring rác 0.58. Template thêm dòng cấm
+trích-dẫn + trần 1500; VRAM an toàn vì sliding_window 1024 chặn KV ~0.65GiB).
 Parse output theo `get_final_prompt` code gốc: lấy cặp <prompt>...</prompt> CUỐI CÙNG;
-thiếu delimiter -> fallback dùng nguyên response (bỏ cặp "..." bao ngoài nếu có).
+thiếu delimiter -> fallback dùng nguyên response (bỏ cặp "..." bao ngoài nếu có) —
+TRỪ khi response là bản phân tích CoT (bỏ thẻ) → trả "" để de_loop giữ prompt cũ
++ bỏ eval, tiết kiệm ~200 target-gen cho 1 offspring rác (thật 2026-11-12: "Okay,
+let's break this down…", "**Step 1…" — dấu * chặn startswith nên phải normalize).
 """
 
 from __future__ import annotations
@@ -12,7 +18,12 @@ from __future__ import annotations
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
+from .cuda_compat import apply_turing_sdpa_patch
+
 # Template v1 — khớp args.py: <prompt0>=target, <prompt1>,<prompt2>=donors, <prompt3>=best
+# Dòng "Important" thêm 2026-11-12 (deviation nhẹ cần báo nhóm): template gốc được thiết kế
+# cho GPT-3.5 chấp hành format tốt hơn MedGemma 27B — 27B hay trích dẫn nguyên văn donors
+# khiến 4 bước không kịp khép thẻ <prompt> trong trần token.
 INSTRUCTION_TEMPLATE = """Please follow the instruction step-by-step to generate a better prompt.
 1. Identify the different parts between the Prompt 1 and Prompt 2:
    Prompt 1: {prompt1}
@@ -24,15 +35,37 @@ INSTRUCTION_TEMPLATE = """Please follow the instruction step-by-step to generate
 4. Cross over the prompt in the Step 3 with the following basic prompt and
    generate a final prompt bracketed with <prompt> and </prompt>:
    Basic Prompt: {prompt0}
+
+Important: do NOT repeat or quote the given prompts in your answer — describe each
+step in at most one short line, then output ONLY the final prompt bracketed with
+<prompt> and </prompt>. Do not output anything after the closing tag.
 """
 
+# Dấu hiệu response là bản phân tích CoT (không phải prompt) — chỉ áp dụng khi KHÔNG có
+# thẻ <prompt>: trả "" thay vì fallback nguyên response (khác code gốc get_final_prompt).
+_COT_MARKERS = ("okay", "step 1", "let's", "let us", "sure", "certainly", "got it")
 
-def parse_final_prompt(text: str) -> str:
-    """Trích prompt offspring — logic khớp `utils.get_final_prompt` của code gốc."""
+
+def _looks_like_cot(text: str) -> bool:
+    """Nhận dạng CoT bỏ thẻ; lstrip markdown vì '**Step 1…' chặn startswith (thật 2026-11-12)."""
+    head = text.lstrip("*#`> \n\t").lower()
+    return head.startswith(_COT_MARKERS) or "step 1" in head[:300]
+
+
+def parse_final_prompt(text: str | list[str]) -> str:
+    """Trích prompt offspring — logic khớp `utils.get_final_prompt` của code gốc.
+
+    Khác code gốc 1 điểm (vá 2026-11-12): response không có thẻ VÀ có dạng phân tích
+    CoT → trả "" (de_loop giữ prompt cũ + bỏ eval) thay vì dùng nguyên response.
+    """
+    if isinstance(text, (list, tuple)):  # phòng khi decode trả về batch (transformers 5.x)
+        text = text[0] if text else ""
     parts = text.split("<prompt>")
     if len(parts) > 1:
         prompt = parts[-1].split("</prompt>")[0]
         return prompt.strip()
+    if _looks_like_cot(text):
+        return ""
     if text.startswith('"') and text.endswith('"'):
         text = text[1:-1]
     return text.strip()
@@ -47,17 +80,26 @@ class EvolutionLLM:
         self._load(cfg)
 
     def _load(self, cfg: dict) -> None:
+        apply_turing_sdpa_patch()
         kwargs: dict = {"device_map": "auto"}
+        if torch.cuda.device_count() >= 2:
+            # 2 GPU (Kaggle T4×2): 27B 4-bit cần ~14.5GiB (embed bf16 2.8GB không
+            # quantize được; bnb 4-bit KHÔNG chạy trên CPU → không được để rơi layer).
+            # ⚠️ transformers TỰ TRỪ 10% max_memory cho buffer quantize
+            # (Bnb4BitHfQuantizer.adjust_max_memory) → cap 4+12=16GiB chỉ còn 14.4
+            # → thiếu ~0.1GiB → module rơi CPU → ValueError (đã gặp thật 2026-11-11).
+            # Cap 4+14 → budget 16.2GiB ✓; GPU0 giữ ~2.6GiB cho KV cache target.
+            kwargs["max_memory"] = {0: "4GiB", 1: "14GiB"}
         if cfg.get("load_in_4bit", False):
             compute_dtype = getattr(torch, cfg.get("bnb_compute_dtype", "float16"))
             kwargs["quantization_config"] = BitsAndBytesConfig(
                 load_in_4bit=True,
                 bnb_4bit_quant_type="nf4",
-                bnb_4bit_compute_dtype=compute_dtype,  # T4: float16; L4/A100: bfloat16
+                bnb_4bit_compute_dtype=compute_dtype,  # bf16 (fp16 gây NaN trên T4 — đã chẩn đoán)
                 bnb_4bit_use_double_quant=True,
             )
         else:
-            kwargs["torch_dtype"] = getattr(torch, cfg.get("dtype", "bfloat16"))
+            kwargs["dtype"] = getattr(torch, cfg.get("dtype", "bfloat16"))
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_id)
         self.model = AutoModelForCausalLM.from_pretrained(self.model_id, **kwargs)
         self.model.eval()
@@ -67,6 +109,9 @@ class EvolutionLLM:
         self, target_prompt: str, donor1: str, donor2: str, best_prompt: str
     ) -> str:
         """1 request/offspring — trả prompt đã parse (theo code gốc: 1 request, temp 0.5)."""
+        # GPU 1 gần đầy (27B ~12GiB + BERTScore): mảnh vỡ allocator 100-200MiB đủ
+        # gây OOM lúc prefill (đã gặp thật) → dọn trước mỗi lần sinh
+        torch.cuda.empty_cache()
         user_text = INSTRUCTION_TEMPLATE.format(
             prompt0=target_prompt, prompt1=donor1, prompt2=donor2, prompt3=best_prompt
         )
@@ -86,5 +131,6 @@ class EvolutionLLM:
             top_p=self.top_p,
         )
         trimmed = output[:, inputs["input_ids"].shape[1]:]
-        response = self.tokenizer.decode(trimmed, skip_special_tokens=True)
+        # transformers 5.x: decode với tensor 2D trả về LIST chuỗi → lấy phần tử đầu
+        response = self.tokenizer.batch_decode(trimmed, skip_special_tokens=True)[0]
         return parse_final_prompt(response)

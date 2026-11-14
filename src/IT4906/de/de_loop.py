@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import random
 import time
@@ -48,6 +49,23 @@ def k_init_pop(initial_mode: str, pool_sorted: list[str], k: int) -> list[str]:
     )
 
 
+def run_fingerprint(cfg: dict) -> str:
+    """Fingerprint phần config ảnh hưởng KẾT QUẢ (bỏ key thuần vận hành).
+
+    Được ghi vào checkpoint: `_try_resume` chỉ chấp nhận checkpoint khi khớp —
+    checkpoint sinh ra từ cấu hình khác (đổi metric, dtype, num_samples...)
+    sẽ bị LOẠI thay vì resume âm thầm với fitness trộn 2 thang đo (rủi ro thật
+    2026-11-11: thêm bertscore_bf16 đổi nhẹ thang đo, checkpoint cũ còn nằm đó).
+    - `data.dataset_dir` được GIỮ trong fp: đổi dataset = đổi thang đo → phải eval lại.
+    - Bỏ `de.cache_dir` (thư mục out) và `fitness.device` (bố trí GPU) — không đổi kết quả.
+    """
+    cfg2 = json.loads(json.dumps(cfg))  # deep copy
+    cfg2.get("de", {}).pop("cache_dir", None)
+    cfg2.get("fitness", {}).pop("device", None)
+    payload = json.dumps(cfg2, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:10]
+
+
 class DERunner:
     def __init__(self, cfg: dict, out_dir: str):
         self.cfg = cfg
@@ -71,6 +89,7 @@ class DERunner:
         self.evaluated: dict[str, dict] = {}  # prompt -> {"fitness", "bertscore_f1", "rougeL_f1"}
         self.history: list[dict] = []
         self.checkpoint_path = self.out_dir / "checkpoint.json"
+        self._run_fp = run_fingerprint(cfg)
 
     # ---------- evaluation ----------
     def evaluate_prompt(self, prompt_text: str, samples: list[Sample] | None = None) -> dict:
@@ -84,6 +103,7 @@ class DERunner:
     # ---------- checkpoint ----------
     def _save_checkpoint(self, step_done: int, population: list[str], best_prompt: str, best_score: float) -> None:
         ckpt = {
+            "run_fp": self._run_fp,
             "step_done": step_done,
             "population": population,
             "best_prompt": best_prompt,
@@ -99,6 +119,17 @@ class DERunner:
         if not self.checkpoint_path.exists():
             return None
         ckpt = json.loads(self.checkpoint_path.read_text(encoding="utf-8"))
+        if ckpt.get("run_fp") != self._run_fp:
+            # Checkpoint sinh ra từ cấu hình khác → fitness trong đó không so được
+            # với thang đo hiện tại → LOẠI (đổi tên giữ lại để tra cứu, không resume).
+            stale = self.out_dir / "checkpoint_stale.json"
+            self.checkpoint_path.replace(stale)
+            print(
+                f"[checkpoint] BỎ checkpoint cũ — sinh từ cấu hình khác "
+                f"(run_fp {ckpt.get('run_fp')} ≠ {self._run_fp}) → lưu thành {stale.name}. "
+                "Pool sẽ eval lại (gen_cache vẫn dùng được nên generation không tốn GPU)."
+            )
+            return None
         self.evaluated = ckpt["evaluated_prompts"]
         self.history = ckpt["history"]
         print(
@@ -155,6 +186,23 @@ class DERunner:
                 if not self.donor_random:
                     c = best_prompt
                 offspring = self.evolution.evolve(target_prompt=old, donor1=a, donor2=b, best_prompt=c)
+                if not offspring.strip():
+                    print(
+                        f"[gen {step} pop {j + 1}/{self.N}] cảnh báo: offspring rỗng từ Evolution LLM "
+                        "→ giữ target, bỏ qua eval (tiết kiệm 1 lần eval GPU)"
+                    )
+                    gen_log["offspring"].append(
+                        {
+                            "target": old,
+                            "donors": [str(a), str(b), str(c)],
+                            "offspring": "",
+                            "old_fitness": old_scores["fitness"],
+                            "offspring_fitness": None,
+                            "kept": False,
+                        }
+                    )
+                    new_pop.append(old)
+                    continue
                 off_scores = self.evaluated.get(offspring)
                 if off_scores is None:
                     off_scores = self.evaluate_prompt(offspring)
