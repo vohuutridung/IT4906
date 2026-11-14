@@ -2,6 +2,7 @@
 
 Đặc tả: `context/docs/de_spec.md` (đã đối chiếu code gốc `beeevita/EvoPrompt` ngày 2026-11-10).
 Kế hoạch chạy: `context/docs/de_execution_plan.md` (Kaggle/Colab, checkpoint + cache).
+👉 **Cài đặt + chạy + bàn giao: `HANDOVER.md` (cùng thư mục).**
 
 ## Cấu trúc
 | File | Vai trò |

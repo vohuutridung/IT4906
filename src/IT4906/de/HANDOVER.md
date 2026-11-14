@@ -1,7 +1,8 @@
 # HANDOVER — Pipeline DE (EvoPrompt) Medical Findings Generation
 
 > Tài liệu bàn giao cho người tiếp nhận chạy full run. Cập nhật: **2026-11-14**.
-> Đặc tả chi tiết module: `src/IT4906/de/README.md`.
+> Đặc tả chi tiết module: `README.md` (cùng thư mục).
+> ⚠️ Mọi lệnh bên dưới chạy **từ root repo** (thư mục chứa `configs/`, `pyproject.toml`).
 
 ## 1. Dự án là gì
 
