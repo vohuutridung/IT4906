@@ -25,6 +25,7 @@ Mở `data/med_findings_gen/EDA/01_vnmedical_data_analysis.ipynb` trong Jupyter 
 
 - `configs/de.yaml`: cấu hình pipeline de.
 - `configs/ga.yaml`: cấu hình pipeline ga.
+- **`HANDOVER.md`**: hướng dẫn cài đặt + chạy + bàn giao pipeline DE (đọc cái này trước).
 
 ## Prompt
 
