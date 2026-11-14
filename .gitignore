@@ -221,3 +221,6 @@ __marimo__/
 data/med_findings_gen/VNMedical_bv175/data/*.parquet
 data/med_findings_gen/VNMedical_bv175/.cache/
 data/cls/
+
+# Personal work context (never commit/push)
+/context/
