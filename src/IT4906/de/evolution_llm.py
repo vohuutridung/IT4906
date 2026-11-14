@@ -1,4 +1,9 @@
-"""Evolution LLM — `google/medgemma-27b-text-it` (text-only, 4-bit trên Kaggle 2×T4).
+"""Evolution LLM — 2 provider chọn qua config `evolution_llm.provider`:
+
+- "openai" (mặc định theo chỉ dẫn của Dũng 2026-11-13): gọi endpoint OpenAI-compatible
+  qua `OpenAI(base_url=..., api_key=...)` — GIÁ TRỊ THẬT nằm trong biến môi trường
+  (file `.env`, được `run_de.py` nạp; `.env` đã git-ignore, KHÔNG hardcode vào code).
+- "local": load `google/medgemma-27b-text-it` bằng transformers (4-bit trên Kaggle 2×T4).
 
 Instruction 4 bước nguyên văn EvoPrompt (Proposal slide 9):
 Difference extraction -> Mutation -> Combine (với Prompt 3) -> Crossover (với Basic Prompt).
@@ -14,6 +19,9 @@ let's break this down…", "**Step 1…" — dấu * chặn startswith nên ph�
 """
 
 from __future__ import annotations
+
+import os
+import time
 
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
@@ -73,11 +81,37 @@ def parse_final_prompt(text: str | list[str]) -> str:
 
 class EvolutionLLM:
     def __init__(self, cfg: dict):
+        self.provider: str = str(cfg.get("provider", "openai"))
         self.model_id: str = cfg["model_id"]
         self.max_new_tokens: int = int(cfg.get("max_new_tokens", 1000))
         self.temperature: float = float(cfg.get("temperature", 0.5))
         self.top_p: float = float(cfg.get("top_p", 0.95))
-        self._load(cfg)
+        if self.provider == "openai":
+            self._load_openai(cfg)
+        else:
+            self._load(cfg)
+
+    def _load_openai(self, cfg: dict) -> None:
+        """Client OpenAI-compatible — base_url + api_key ĐỌC TỪ BIẾN MÔI TRƯỜNG
+        (tên biến đặt trong config; giá trị thật trong `.env`, được `run_de.py` nạp).
+        Không hardcode credential vào code/repo (chỉ dẫn Dũng 2026-11-13)."""
+        from openai import OpenAI  # import muộn: chạy provider "local" không cần gói openai
+
+        base_url_env = str(cfg.get("base_url_env", "EVOLUTION_LLM_BASE_URL"))
+        api_key_env = str(cfg.get("api_key_env", "EVOLUTION_LLM_API_KEY"))
+        base_url = os.environ.get(base_url_env)
+        api_key = os.environ.get(api_key_env)
+        missing = [
+            name for name, value in ((base_url_env, base_url), (api_key_env, api_key)) if not value
+        ]
+        if missing:
+            raise RuntimeError(
+                f"evolution_llm.provider='openai' nhưng thiếu biến môi trường: {', '.join(missing)}. "
+                "Copy .env.example thành .env rồi điền base_url + api_key thật "
+                "(KHÔNG hardcode vào code — .env đã git-ignore)."
+            )
+        self.client = OpenAI(base_url=base_url, api_key=api_key)
+        print(f"[evolution] provider=openai — model={self.model_id} base_url={base_url}")
 
     def _load(self, cfg: dict) -> None:
         apply_turing_sdpa_patch()
@@ -104,17 +138,48 @@ class EvolutionLLM:
         self.model = AutoModelForCausalLM.from_pretrained(self.model_id, **kwargs)
         self.model.eval()
 
-    @torch.inference_mode()
     def evolve(
         self, target_prompt: str, donor1: str, donor2: str, best_prompt: str
     ) -> str:
         """1 request/offspring — trả prompt đã parse (theo code gốc: 1 request, temp 0.5)."""
-        # GPU 1 gần đầy (27B ~12GiB + BERTScore): mảnh vỡ allocator 100-200MiB đủ
-        # gây OOM lúc prefill (đã gặp thật) → dọn trước mỗi lần sinh
-        torch.cuda.empty_cache()
         user_text = INSTRUCTION_TEMPLATE.format(
             prompt0=target_prompt, prompt1=donor1, prompt2=donor2, prompt3=best_prompt
         )
+        if self.provider == "openai":
+            response = self._chat_openai(user_text)
+        else:
+            response = self._generate_local(user_text)
+        return parse_final_prompt(response)
+
+    def _chat_openai(self, user_text: str) -> str:
+        """Gọi endpoint OpenAI-compatible. `max_tokens` (không phải
+        max_completion_tokens) vì endpoint của nhóm có thể là vLLM/proxy bên thứ ba —
+        tham số cũ được hỗ trợ rộng nhất."""
+        last_err: Exception | None = None
+        for attempt in range(1, 4):  # DE chạy dài, endpoint có thể giật → thử lại 3 lần
+            try:
+                resp = self.client.chat.completions.create(
+                    model=self.model_id,
+                    messages=[{"role": "user", "content": user_text}],
+                    temperature=self.temperature,
+                    top_p=self.top_p,
+                    max_tokens=self.max_new_tokens,
+                )
+                return resp.choices[0].message.content or ""
+            except Exception as err:  # noqa: BLE001 — log rồi thử lại, hết lượt mới raise
+                last_err = err
+                print(f"[evolution] gọi API lỗi (lần {attempt}/3): {err}")
+                time.sleep(5 * attempt)
+        raise RuntimeError(
+            f"Evolution LLM qua API thất bại sau 3 lần thử (model={self.model_id})"
+        ) from last_err
+
+    @torch.inference_mode()
+    def _generate_local(self, user_text: str) -> str:
+        """Sinh bằng model local (transformers) — path cũ khi không có endpoint."""
+        # GPU 1 gần đầy (27B ~12GiB + BERTScore): mảnh vỡ allocator 100-200MiB đủ
+        # gây OOM lúc prefill (đã gặp thật) → dọn trước mỗi lần sinh
+        torch.cuda.empty_cache()
         messages = [{"role": "user", "content": user_text}]
         inputs = self.tokenizer.apply_chat_template(
             messages,
@@ -133,4 +198,4 @@ class EvolutionLLM:
         trimmed = output[:, inputs["input_ids"].shape[1]:]
         # transformers 5.x: decode với tensor 2D trả về LIST chuỗi → lấy phần tử đầu
         response = self.tokenizer.batch_decode(trimmed, skip_special_tokens=True)[0]
-        return parse_final_prompt(response)
+        return response

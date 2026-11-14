@@ -15,7 +15,18 @@ Kế hoạch chạy: `context/docs/de_execution_plan.md` (Kaggle/Colab, checkpoi
 
 ## Dependencies (chưa thêm vào pyproject — chờ xác nhận vì file dùng chung với nhóm GA)
 `torch`, `transformers`, `accelerate`, `bitsandbytes`, `datasets`, `pillow`,
-`bert_score`, `rouge-score`, `pyyaml`
+`bert_score`, `rouge-score`, `pyyaml`.
+Đã thêm vào pyproject: `openai`, `python-dotenv` (gọn, không đụng GPU).
+
+## Evolution LLM — 2 provider (`configs/de.yaml` → `evolution_llm.provider`)
+- `openai` (mặc định, chỉ dẫn Dũng 2026-11-13): gọi endpoint OpenAI-compatible:
+  ```python
+  from openai import OpenAI
+  client = OpenAI(base_url="...", api_key="...")
+  ```
+  base_url + api_key ĐỌC TỪ BIẾN MÔI TRƯỜNG — copy `.env.example` thành `.env`,
+  điền giá trị thật (`.env` git-ignore, không commit). Được `run_de.py` nạp tự động.
+- `local`: load `medgemma-27b-text-it` bằng transformers 4-bit trên Kaggle 2×T4 (path cũ).
 
 ## Chạy trên Kaggle
 - Notebook self-contained: `context/notebooks/de_kaggle_run.ipynb` — attach dataset + secret `HF_TOKEN` là chạy được, KHÔNG cần sửa `pyproject.toml` (pip install trong notebook).

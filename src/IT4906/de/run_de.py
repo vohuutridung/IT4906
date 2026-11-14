@@ -16,6 +16,22 @@ import yaml
 from .de_loop import DERunner
 
 
+def load_env() -> None:
+    """Nạp biến môi trường từ file `.env` ở thư mục chạy (nếu có python-dotenv).
+
+    base_url + api_key của Evolution LLM KHÔNG hardcode vào code/repo (chỉ dẫn
+    Dũng 2026-11-13) — điền vào `.env` (đã git-ignore); thiếu dotenv thì biến
+    môi trường vẫn đọc được nếu đã export thủ công."""
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        print("[env] chưa cài python-dotenv — bỏ qua .env, dùng biến môi trường có sẵn")
+        return
+    loaded = load_dotenv()
+    if loaded:
+        print("[env] đã nạp .env")
+
+
 def set_seed(seed: int) -> None:
     """Khớp `utils.set_seed` code gốc: seed toàn cục random + numpy + torch."""
     random.seed(seed)
@@ -33,6 +49,8 @@ def main() -> None:
         help="ghi đè config, VD: --set data.num_samples 50",
     )
     args = parser.parse_args()
+
+    load_env()
 
     with open(args.config, encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
