@@ -30,6 +30,5 @@ Kế hoạch chạy: `context/docs/de_execution_plan.md` (Kaggle/Colab, checkpoi
 - `local`: load `medgemma-27b-text-it` bằng transformers 4-bit trên Kaggle 2×T4 (path cũ).
 
 ## Chạy trên Kaggle
-- Notebook self-contained: `context/notebooks/de_kaggle_run.ipynb` — attach dataset + secret `HF_TOKEN` là chạy được, KHÔNG cần sửa `pyproject.toml` (pip install trong notebook).
-- Dataset input: `/kaggle/input/vnmedical-bv175` (config `data.dataset_dir` trỏ tới đây).
-- Output/cache: ghi vào `/kaggle/working/runs/de/` để Save Version giữ lại.
+
+Dùng `deployment/kaggle/run.sh` với các chế độ `setup`, `smoke` và `evolve`. Các cell mẫu, đường dẫn dataset và cách nạp Secrets có trong mục [Chạy trên Kaggle](HANDOVER.md#chạy-trên-kaggle).

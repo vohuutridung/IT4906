@@ -27,6 +27,10 @@ Mở `data/med_findings_gen/EDA/01_vnmedical_data_analysis.ipynb` trong Jupyter 
 - `configs/ga.yaml`: cấu hình pipeline ga.
 - **`src/IT4906/de/HANDOVER.md`**: hướng dẫn cài đặt + chạy + bàn giao pipeline DE (đọc cái này trước).
 
+## Chạy DE trên Kaggle
+
+Notebook gọi `bash deployment/kaggle/run.sh --mode MODE`, với `MODE` là `setup`, `smoke` hoặc `evolve`. Các cell mẫu nằm trong mục [Chạy trên Kaggle](src/IT4906/de/HANDOVER.md#chạy-trên-kaggle).
+
 ## Prompt
 
 - `data/med_findings_gen/prompts.txt`: các phiên bản prompt đang được lưu để so sánh.

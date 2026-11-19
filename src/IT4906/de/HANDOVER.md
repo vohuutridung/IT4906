@@ -79,11 +79,55 @@ uv run python -m IT4906.de.run_de --config configs/de.yaml 2>&1 | tee runs/de_lo
 
 ### Chạy trên Kaggle
 
-- Dataset: `--set data.dataset_dir "/kaggle/input/vnmedical-bv175"` (tên khớp dataset đã attach).
-- Output: `--set de.cache_dir "/kaggle/working/runs/de"` để Save Version giữ lại.
-- Notebook self-contained `de_kaggle_run.ipynb` nằm ngoài git — xin từ người bàn giao, hoặc tự dựng
-  notebook: `!git clone -b feat/de-med-findings https://github.com/vohuutridung/IT4906.git`
-  → `!pip install -e IT4906` + deps ở §3 → thêm secret/env rồi chạy lệnh ở §5.
+Bật GPU và Internet, rồi attach dataset VNMedical_bv175. `--data-root` trỏ đến thư mục chứa `val-*.parquet`, `data/val-*.parquet` hoặc `val/*.parquet`.
+
+**Cell 1. Clone và cài dependencies**
+
+```python
+!git clone --branch main --depth 1 https://github.com/vohuutridung/IT4906.git /kaggle/working/IT4906
+%cd /kaggle/working/IT4906
+!bash deployment/kaggle/run.sh --mode setup
+```
+
+**Cell 2. Nạp Kaggle Secrets**
+
+```python
+import os
+from kaggle_secrets import UserSecretsClient
+
+secrets = UserSecretsClient()
+os.environ["HF_TOKEN"] = secrets.get_secret("HF_TOKEN")
+os.environ["EVOLUTION_LLM_BASE_URL"] = secrets.get_secret("EVOLUTION_LLM_BASE_URL")
+os.environ["EVOLUTION_LLM_API_KEY"] = secrets.get_secret("EVOLUTION_LLM_API_KEY")
+```
+
+`HF_TOKEN` cần có quyền tải target model. Nếu dùng Evolution LLM local, bỏ hai dòng `EVOLUTION_LLM_*`, dùng `--set evolution_llm.provider local` và đặt model ID theo repo Hugging Face đã được cấp quyền.
+
+**Cell 3. Chạy thử**
+
+Thay `--data-root` bằng đường dẫn dataset đã attach và `MODEL_ID_CUA_ENDPOINT` bằng tên model mà endpoint cung cấp.
+
+```python
+!bash deployment/kaggle/run.sh \
+  --mode smoke \
+  --data-root /kaggle/input/vnmedical-bv175 \
+  --work-root /kaggle/working/it4906 \
+  --set evolution_llm.model_id MODEL_ID_CUA_ENDPOINT
+```
+
+**Cell 4. Chạy đầy đủ**
+
+```python
+!bash deployment/kaggle/run.sh \
+  --mode evolve \
+  --data-root /kaggle/input/vnmedical-bv175 \
+  --work-root /kaggle/working/it4906 \
+  --set evolution_llm.model_id MODEL_ID_CUA_ENDPOINT
+```
+
+`smoke` ghi vào `/kaggle/working/it4906/runs/de_smoke/`, còn `evolve` ghi vào `/kaggle/working/it4906/runs/de/`. Kết quả cuối là `best_prompt.json`. Để tiếp tục ở session mới, chép thư mục kết quả cũ vào đúng thư mục output và gọi lại `evolve` với cấu hình cũ. Runner tự tìm `checkpoint.json`.
+
+Thêm `--set data.num_samples 50` hoặc `--set de.iterations 3` để thử cấu hình nhỏ hơn. Dùng một `--work-root` riêng cho từng cấu hình thí nghiệm.
 
 ## 6. Checkpoint & cache — đọc trước khi dọn dẹp
 

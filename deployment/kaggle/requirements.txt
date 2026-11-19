@@ -1,0 +1,14 @@
+# The Kaggle GPU image provides CUDA-enabled PyTorch.
+accelerate
+bert-score
+bitsandbytes
+datasets
+huggingface-hub
+numpy
+openai
+pillow
+python-dotenv
+pyyaml
+rouge-score
+sentencepiece
+transformers>=5,<6
