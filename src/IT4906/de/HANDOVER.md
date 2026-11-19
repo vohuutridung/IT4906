@@ -79,7 +79,7 @@ uv run python -m IT4906.de.run_de --config configs/de.yaml 2>&1 | tee runs/de_lo
 
 ### Chạy trên Kaggle
 
-Bật GPU và Internet, rồi attach dataset VNMedical_bv175. `--data-root` trỏ đến thư mục chứa `val-*.parquet`, `data/val-*.parquet` hoặc `val/*.parquet`.
+Bật GPU và Internet. Runner đọc trực tiếp split `val` của `MilitaryHospital175/VNMedical_bv175` từ Hugging Face bằng streaming. Nếu đã có Parquet, truyền `--data-root` trỏ đến thư mục chứa `val-*.parquet`, `data/val-*.parquet` hoặc `val/*.parquet`.
 
 **Cell 1. Clone và cài dependencies**
 
@@ -105,12 +105,11 @@ os.environ["EVOLUTION_LLM_API_KEY"] = secrets.get_secret("EVOLUTION_LLM_API_KEY"
 
 **Cell 3. Chạy thử**
 
-Thay `--data-root` bằng đường dẫn dataset đã attach và `MODEL_ID_CUA_ENDPOINT` bằng tên model mà endpoint cung cấp.
+Thay `MODEL_ID_CUA_ENDPOINT` bằng tên model mà endpoint cung cấp.
 
 ```python
 !bash deployment/kaggle/run.sh \
   --mode smoke \
-  --data-root /kaggle/input/vnmedical-bv175 \
   --work-root /kaggle/working/it4906 \
   --set evolution_llm.model_id MODEL_ID_CUA_ENDPOINT
 ```
@@ -120,7 +119,6 @@ Thay `--data-root` bằng đường dẫn dataset đã attach và `MODEL_ID_CUA_
 ```python
 !bash deployment/kaggle/run.sh \
   --mode evolve \
-  --data-root /kaggle/input/vnmedical-bv175 \
   --work-root /kaggle/working/it4906 \
   --set evolution_llm.model_id MODEL_ID_CUA_ENDPOINT
 ```
@@ -137,8 +135,8 @@ Tất cả nằm trong `runs/de/` (hoặc thư mục `de.cache_dir`):
 |---|---|
 | `checkpoint.json` | Lưu sau MỖI thế hệ. Chạy lại **cùng config** → tự resume, không mất công cũ |
 | `checkpoint_stale.json` | Checkpoint sinh từ config KHÁC bị đổi tên thế này (chống trộn fitness 2 thang đo) — có thể xóa |
-| `gen_cache_<fp>.jsonl` | Cache generation target 4B. Đổi dtype/do_sample/max_new_tokens → `<fp>` mới → cache cũ không tái dùng (chống poison) |
-| `fitness_cache_<fp>.json` | Cache điểm fitness. Đổi metric/model → file mới |
+| `cache/<data_fp>/gen_cache_<fp>.jsonl` | Cache generation target 4B, tách theo nguồn dữ liệu, split và cấu hình sinh |
+| `cache/<data_fp>/fitness_cache_<fp>.json` | Cache điểm fitness, tách theo nguồn dữ liệu, split và cấu hình metric |
 | `stepN_pop.json` | Population + điểm sau mỗi thế hệ |
 | `best_prompt.json` | **Kết quả cuối**: best_prompt, best_fitness, final_population có điểm từng prompt |
 

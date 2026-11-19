@@ -11,7 +11,7 @@ Modes:
   evolve   Run DE, resuming a matching checkpoint if found.
 
 Options for smoke and evolve:
-  --data-root PATH    Attached Parquet dataset root (default: /kaggle/input/vnmedical-bv175).
+  --data-root PATH    Use attached Parquet files instead of streaming from Hugging Face.
   --work-root PATH    Write to PATH/runs/de or PATH/runs/de_smoke (default: /kaggle/working).
   --config PATH       DE YAML configuration (default: configs/de.yaml).
   --set KEY VALUE     Override a YAML setting. May be repeated.
@@ -27,7 +27,7 @@ fail() {
 }
 
 mode=""
-data_root="/kaggle/input/vnmedical-bv175"
+data_root=""
 work_root="/kaggle/working"
 config="configs/de.yaml"
 overrides=()
@@ -68,9 +68,10 @@ case "$mode" in
         ;;
     smoke|evolve)
         [[ -f "$config" ]] || fail "Config file not found: $config"
-        args=(--config "$config"
-              --set data.dataset_dir "$data_root"
-              --set de.cache_dir "${work_root%/}/runs/de")
+        args=(--config "$config" --set de.cache_dir "${work_root%/}/runs/de")
+        if [[ -n "$data_root" ]]; then
+            args+=(--set data.dataset_dir "$data_root")
+        fi
         if [[ "$mode" == smoke ]]; then
             args+=(--smoke)
         fi

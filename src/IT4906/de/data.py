@@ -10,6 +10,8 @@ from typing import Any
 from datasets import load_dataset
 from PIL import Image
 
+DEFAULT_DATASET_ID = "MilitaryHospital175/VNMedical_bv175"
+
 # Prompt hệ thống theo Appendix A (paper ViX-Ray)
 SYSTEM_PROMPT = "Bạn là trợ lý bác sĩ"
 
@@ -58,14 +60,25 @@ def find_parquet_files(dataset_dir: str, split: str) -> list[str]:
     )
 
 
-def load_split(dataset_dir: str, split: str, num_samples: int | None = None) -> list[Sample]:
-    """Load split theo thứ tự parquet gốc, lấy num_samples mẫu đầu (mặc định: hết)."""
-    files = find_parquet_files(dataset_dir, split)
-    ds = load_dataset("parquet", data_files={split: files}, split=split)
-    if num_samples is not None:
-        ds = ds.select(range(min(num_samples, len(ds))))
+def load_split(
+    dataset_dir: str | None,
+    split: str,
+    num_samples: int | None = None,
+    *,
+    dataset_id: str = DEFAULT_DATASET_ID,
+) -> list[Sample]:
+    """Đọc các mẫu đầu của split từ Parquet local hoặc stream từ Hugging Face."""
+    if dataset_dir:
+        files = find_parquet_files(dataset_dir, split)
+        rows = load_dataset("parquet", data_files={split: files}, split=split)
+        if num_samples is not None:
+            rows = rows.select(range(min(num_samples, len(rows))))
+    else:
+        rows = load_dataset(dataset_id, split=split, streaming=True)
+        if num_samples is not None:
+            rows = rows.take(num_samples)
     samples: list[Sample] = []
-    for i, row in enumerate(ds):
+    for i, row in enumerate(rows):
         meta = {
             "Ages": str(row["Ages"]),
             "sex": str(row["sex"]),

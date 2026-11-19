@@ -4,8 +4,8 @@
 seed: 5  # official default (set_seed toàn cục: random + numpy + torch)
 
 data:
-  # Chạy local: giữ nguyên. Trên Kaggle: đổi thành /kaggle/input/vnmedical-bv175
-  dataset_dir: "data/med_findings_gen/VNMedical_bv175"
+  dataset_id: "MilitaryHospital175/VNMedical_bv175"
+  dataset_dir: null  # Tùy chọn: thư mục Parquet có sẵn sẽ được ưu tiên.
   split: "val"
   num_samples: 200  # 200 sample ĐẦU của val (thứ tự parquet gốc — cần xác nhận nhóm)
 

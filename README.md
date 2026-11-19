@@ -11,6 +11,8 @@ uv add huggingface_hub
 
 ## Tải dataset
 
+DE đọc trực tiếp `MilitaryHospital175/VNMedical_bv175` từ Hugging Face theo mặc định. Nếu muốn có bản Parquet local để chạy offline hoặc mở notebook EDA, tải riêng bằng lệnh sau.
+
 ```bash
 uv run python data/med_findings_gen/download_data.py
 ```

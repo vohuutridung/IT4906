@@ -20,7 +20,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .data import Sample, load_split, render_prompt
+from .data import DEFAULT_DATASET_ID, Sample, load_split, render_prompt
 from .evolution_llm import EvolutionLLM
 from .fitness import FitnessEvaluator
 from .target_llm import TargetLLM
@@ -56,7 +56,7 @@ def run_fingerprint(cfg: dict) -> str:
     checkpoint sinh ra từ cấu hình khác (đổi metric, dtype, num_samples...)
     sẽ bị LOẠI thay vì resume âm thầm với fitness trộn 2 thang đo (rủi ro thật
     2026-11-11: thêm bertscore_bf16 đổi nhẹ thang đo, checkpoint cũ còn nằm đó).
-    - `data.dataset_dir` được GIỮ trong fp: đổi dataset = đổi thang đo → phải eval lại.
+    - Cấu hình nguồn dữ liệu được giữ trong fingerprint để tách checkpoint giữa các nguồn.
     - Bỏ `de.cache_dir` (thư mục out) và `fitness.device` (bố trí GPU) — không đổi kết quả.
     """
     cfg2 = json.loads(json.dumps(cfg))  # deep copy
@@ -77,13 +77,20 @@ class DERunner:
         self.initial_mode: str = cfg["de"].get("initial_mode", "topk")
         self.donor_random: bool = bool(cfg["de"].get("donor_random", False))
 
+        data_cfg = cfg["data"]
+        dataset_dir = data_cfg.get("dataset_dir")
+        dataset_id = data_cfg.get("dataset_id", DEFAULT_DATASET_ID)
+        split = data_cfg.get("split", "val")
+        source = {"parquet": str(Path(dataset_dir).resolve())} if dataset_dir else {"hub": dataset_id}
+        data_key = json.dumps({"source": source, "split": split}, sort_keys=True)
+        data_fingerprint = hashlib.sha1(data_key.encode("utf-8")).hexdigest()[:10]
+        cache_dir = str(self.out_dir / "cache" / data_fingerprint)
+        print(f"[data] source={dataset_dir or dataset_id} split={split}")
         self.samples: list[Sample] = load_split(
-            cfg["data"]["dataset_dir"],
-            cfg["data"].get("split", "val"),
-            int(cfg["data"].get("num_samples", 200)),
+            dataset_dir, split, int(data_cfg.get("num_samples", 200)), dataset_id=dataset_id
         )
-        self.target = TargetLLM(cfg["target_llm"], str(self.out_dir))
-        self.fitness = FitnessEvaluator(cfg["fitness"], str(self.out_dir))
+        self.target = TargetLLM(cfg["target_llm"], cache_dir)
+        self.fitness = FitnessEvaluator(cfg["fitness"], cache_dir)
         self.evolution = EvolutionLLM(cfg["evolution_llm"])
 
         self.evaluated: dict[str, dict] = {}  # prompt -> {"fitness", "bertscore_f1", "rougeL_f1"}
@@ -127,7 +134,7 @@ class DERunner:
             print(
                 f"[checkpoint] BỎ checkpoint cũ — sinh từ cấu hình khác "
                 f"(run_fp {ckpt.get('run_fp')} ≠ {self._run_fp}) → lưu thành {stale.name}. "
-                "Pool sẽ eval lại (gen_cache vẫn dùng được nên generation không tốn GPU)."
+                "Pool sẽ được chấm lại, có thể dùng cache generation nếu còn khớp."
             )
             return None
         self.evaluated = ckpt["evaluated_prompts"]
