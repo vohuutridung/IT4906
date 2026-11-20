@@ -19,7 +19,7 @@ Kế hoạch chạy: `context/docs/de_execution_plan.md` (Kaggle/Colab, checkpoi
 `bert_score`, `rouge-score`, `pyyaml`.
 Đã thêm vào pyproject: `openai`, `python-dotenv` (gọn, không đụng GPU).
 
-## Evolution LLM — 2 provider (`configs/de.yaml` → `evolution_llm.provider`)
+## Provider của Evolution LLM (`configs/de.yaml` → `evolution_llm.provider`)
 - `openai` (mặc định, chỉ dẫn Dũng 2026-11-13): gọi endpoint OpenAI-compatible:
   ```python
   from openai import OpenAI
@@ -27,6 +27,7 @@ Kế hoạch chạy: `context/docs/de_execution_plan.md` (Kaggle/Colab, checkpoi
   ```
   base_url + api_key ĐỌC TỪ BIẾN MÔI TRƯỜNG — copy `.env.example` thành `.env`,
   điền giá trị thật (`.env` git-ignore, không commit). Được `run_de.py` nạp tự động.
+- `openrouter`: dùng `OPENROUTER_API_KEY` và mặc định `openai/gpt-oss-20b`. Bật reasoning trong một lượt gọi cho mỗi offspring.
 - `local`: load `medgemma-27b-text-it` bằng transformers 4-bit trên Kaggle 2×T4 (path cũ).
 
 ## Chạy trên Kaggle

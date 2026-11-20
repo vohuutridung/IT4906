@@ -32,11 +32,11 @@ fitness:  # 0.7 × BERTScore + 0.3 × ROUGE-L — chốt tạm 2026-11-10, SWAPP
 evolution_llm:  # Model lớn lai ghép + đột biến prompt
   # "openai" = gọi endpoint OpenAI-compatible qua OpenAI(base_url, api_key) — chỉ dẫn
   #   Dũng 2026-11-13; giá trị thật nằm trong file .env (KHÔNG hardcode, đã git-ignore).
+  # "openrouter" = gọi OpenRouter bằng OPENROUTER_API_KEY, mặc định openai/gpt-oss-20b.
   # "local"  = load model bằng transformers (path cũ, không cần endpoint).
   provider: "openai"
-  # provider=openai: tên model của endpoint (⚠️ CHỜ NHÓM GỬI — endpoint/base_url nào,
-  # model gì); provider=local: repo HF (⚠️ chốt repo chính xác với nhóm).
-  model_id: "google/medgemma-27b-text-it"
+  # null dùng model mặc định của provider. Có thể ghi đè bằng --evolution-model-id.
+  model_id: null
   # Tên BIẾN MÔI TRƯỜNG chứa thông tin endpoint — giá trị thật điền trong .env
   # (copy từ .env.example). Đổi tên biến chỉ khi nhóm chốt naming chung.
   base_url_env: "EVOLUTION_LLM_BASE_URL"

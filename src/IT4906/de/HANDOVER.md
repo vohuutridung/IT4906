@@ -11,7 +11,7 @@ Tối ưu prompt tạo phần **Findings** trong báo cáo X-quang ngực tiến
 
 - **Target LLM** — `google/medgemma-1.5-4b-it`: sinh Findings theo prompt đang xét.
 - **Fitness** — `0.7 × BERTScore(xlm-roberta-large) + 0.3 × ROUGE-L(F1)` so với findings thật, trên 200 sample đầu của split `val` (VNMedical_bv175).
-- **Evolution LLM** — model lớn lai ghép + đột biến prompt theo instruction 4 bước EvoPrompt. Chọn 1 trong 2 provider (xem §4).
+- **Evolution LLM** — model lớn lai ghép + đột biến prompt theo instruction 4 bước EvoPrompt. Xem các provider ở §4.
 
 ## 2. Trạng thái hiện tại
 
@@ -45,16 +45,16 @@ nhận (file `.env` chỉ được nạp nếu có, không ghi đè biến có s
 
 ## 4. Chọn provider cho Evolution LLM (`configs/de.yaml` → `evolution_llm.provider`)
 
-| | `openai` (mặc định) | `local` |
-|---|---|---|
-| Cách gọi | `OpenAI(base_url, api_key)` qua API OpenAI-compatible | transformers load `medgemma-27b-text-it` 4-bit |
-| Credential | `.env`: `EVOLUTION_LLM_BASE_URL`, `EVOLUTION_LLM_API_KEY` | Không cần (nhưng cần `HF_TOKEN` để tải model) |
-| Yêu cầu GPU | Nhẹ — chỉ target 4B + BERTScore (~1 GPU 16GB thoải mái) | Nặng — 27B 4-bit cần ~14.5GiB: Kaggle **2×T4** (tự chia 4+14GiB) hoặc 1 GPU ≥24GB |
-| Khi nào dùng | Khi đã có endpoint (chỉ dẫn của Dũng 13/11) | Khi không có endpoint |
+| | `openai` (mặc định) | `openrouter` | `local` |
+|---|---|---|---|
+| Cách gọi | Một lượt qua endpoint OpenAI-compatible của nhóm | Một lượt qua OpenRouter với reasoning | Transformers load `medgemma-27b-text-it` 4-bit |
+| Credential | `EVOLUTION_LLM_BASE_URL`, `EVOLUTION_LLM_API_KEY` | `OPENROUTER_API_KEY` | `HF_TOKEN` để tải model nếu cần |
+| Model mặc định | `google/medgemma-27b-text-it` | `openai/gpt-oss-20b` | `google/medgemma-27b-text-it` |
+| Yêu cầu GPU | Target 4B và BERTScore | Target 4B và BERTScore | Thêm 27B 4-bit, dùng Kaggle **2×T4** hoặc 1 GPU ≥24GB |
 
-⚠️ Với `openai`: `evolution_llm.model_id` phải là **tên model của endpoint** (chờ người
-cung cấp endpoint chốt). Retry 3 lần tự động khi endpoint giật.
-`--evolution-model-id ID` ghi đè ID trong YAML cho lần chạy hiện tại. Cờ này dùng được với CLI Python và script Kaggle. Với `local`, truyền ID repo Hugging Face.
+Chọn bằng `--evolution-provider` và dùng `--evolution-model-id ID` nếu muốn đổi model cho lần chạy hiện tại. Hai cờ dùng được với CLI Python và script Kaggle. Với `openai`, ID là tên model trên endpoint. Với `local`, ID là tên repo Hugging Face.
+
+Ở chế độ `openrouter`, runner bật reasoning và bóc tách prompt con từ `message.content` của cùng request. Runner thử gọi lại khi API báo lỗi.
 
 ## 5. Chạy
 
@@ -102,7 +102,11 @@ os.environ["EVOLUTION_LLM_BASE_URL"] = secrets.get_secret("EVOLUTION_LLM_BASE_UR
 os.environ["EVOLUTION_LLM_API_KEY"] = secrets.get_secret("EVOLUTION_LLM_API_KEY")
 ```
 
-`HF_TOKEN` cần có quyền tải target model. Nếu dùng Evolution LLM local, bỏ hai dòng `EVOLUTION_LLM_*`, thêm `--set evolution_llm.provider local` và dùng `--evolution-model-id` với ID repo Hugging Face đã được cấp quyền.
+`HF_TOKEN` cần có quyền tải target model. Nếu dùng OpenRouter, thay hai dòng `EVOLUTION_LLM_*` bằng dòng dưới đây, rồi dùng `--evolution-provider openrouter` trong cell chạy. Nếu dùng Evolution LLM local, dùng `--evolution-provider local` và bỏ hai dòng `EVOLUTION_LLM_*`.
+
+```python
+os.environ["OPENROUTER_API_KEY"] = secrets.get_secret("OPENROUTER_API_KEY")
+```
 
 **Cell 3. Chạy thử**
 
@@ -113,6 +117,15 @@ Thay `MODEL_ID_CUA_ENDPOINT` bằng tên model mà endpoint cung cấp.
   --mode smoke \
   --work-root /kaggle/working/it4906 \
   --evolution-model-id MODEL_ID_CUA_ENDPOINT
+```
+
+Chạy thử qua OpenRouter với model mặc định:
+
+```python
+!bash deployment/kaggle/run.sh \
+  --mode smoke \
+  --work-root /kaggle/working/it4906-openrouter \
+  --evolution-provider openrouter
 ```
 
 **Cell 4. Chạy đầy đủ**

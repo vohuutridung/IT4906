@@ -92,12 +92,16 @@ class DERunner:
         )
         self.target = TargetLLM(cfg["target_llm"], cache_dir)
         self.fitness = FitnessEvaluator(cfg["fitness"], cache_dir)
-        self.evolution = EvolutionLLM(cfg["evolution_llm"])
+        evolution_cfg = cfg["evolution_llm"]
+        self.evolution = EvolutionLLM(evolution_cfg)
 
         self.evaluated: dict[str, dict] = {}  # prompt -> {"fitness", "bertscore_f1", "rougeL_f1"}
         self.history: list[dict] = []
         self.checkpoint_path = self.out_dir / "checkpoint.json"
-        self._run_fp = run_fingerprint(cfg)
+        self._run_fp = run_fingerprint({
+            **cfg,
+            "evolution_llm": {**evolution_cfg, "model_id": self.evolution.model_id},
+        })
 
     # ---------- evaluation ----------
     def evaluate_prompt(self, prompt_text: str, samples: list[Sample] | None = None) -> dict:

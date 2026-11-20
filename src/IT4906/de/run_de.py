@@ -13,6 +13,7 @@ import torch
 import yaml
 
 from .de_loop import DERunner
+from .evolution_llm import DEFAULT_EVOLUTION_MODELS
 
 
 def load_env() -> None:
@@ -44,6 +45,10 @@ def main() -> None:
     parser.add_argument("--config", default="configs/de.yaml")
     parser.add_argument("--smoke", action="store_true", help="5 sample × 1 thế hệ")
     parser.add_argument(
+        "--evolution-provider", choices=tuple(DEFAULT_EVOLUTION_MODELS),
+        help="chọn provider của Evolution LLM",
+    )
+    parser.add_argument(
         "--evolution-model-id", metavar="ID", help="ghi đè model_id của Evolution LLM",
     )
     parser.add_argument(
@@ -66,6 +71,8 @@ def main() -> None:
             node = node[p]
         node[parts[-1]] = yaml.safe_load(value)  # cast kiểu theo YAML
 
+    if args.evolution_provider is not None:
+        cfg["evolution_llm"]["provider"] = args.evolution_provider
     if args.evolution_model_id is not None:
         cfg["evolution_llm"]["model_id"] = args.evolution_model_id
 

@@ -1,9 +1,10 @@
-"""Evolution LLM — 2 provider chọn qua config `evolution_llm.provider`:
+"""Evolution LLM — các provider trong `evolution_llm.provider`:
 
 - "openai" (mặc định theo chỉ dẫn của Dũng 2026-11-13): gọi endpoint OpenAI-compatible
   qua `OpenAI(base_url=..., api_key=...)` — GIÁ TRỊ THẬT nằm trong biến môi trường
   (file `.env`, được `run_de.py` nạp; `.env` đã git-ignore, KHÔNG hardcode vào code).
 - "local": load `google/medgemma-27b-text-it` bằng transformers (4-bit trên Kaggle 2×T4).
+- "openrouter": dùng `OPENROUTER_API_KEY` và bật reasoning trong lượt sinh offspring.
 
 Instruction 4 bước nguyên văn EvoPrompt (Proposal slide 9):
 Difference extraction -> Mutation -> Combine (với Prompt 3) -> Crossover (với Basic Prompt).
@@ -27,6 +28,12 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
 from .cuda_compat import apply_turing_sdpa_patch
+
+DEFAULT_EVOLUTION_MODELS = {
+    "openai": "google/medgemma-27b-text-it",
+    "openrouter": "openai/gpt-oss-20b",
+    "local": "google/medgemma-27b-text-it",
+}
 
 # Template v1 — khớp args.py: <prompt0>=target, <prompt1>,<prompt2>=donors, <prompt3>=best
 # Dòng "Important" thêm 2026-11-12 (deviation nhẹ cần báo nhóm): template gốc được thiết kế
@@ -82,12 +89,16 @@ def parse_final_prompt(text: str | list[str]) -> str:
 class EvolutionLLM:
     def __init__(self, cfg: dict):
         self.provider: str = str(cfg.get("provider", "openai"))
-        self.model_id: str = cfg["model_id"]
+        if self.provider not in DEFAULT_EVOLUTION_MODELS:
+            raise ValueError(f"Provider Evolution LLM không hợp lệ: {self.provider}")
+        self.model_id: str = cfg.get("model_id") or DEFAULT_EVOLUTION_MODELS[self.provider]
         self.max_new_tokens: int = int(cfg.get("max_new_tokens", 1000))
         self.temperature: float = float(cfg.get("temperature", 0.5))
         self.top_p: float = float(cfg.get("top_p", 0.95))
         if self.provider == "openai":
             self._load_openai(cfg)
+        elif self.provider == "openrouter":
+            self._load_openrouter()
         else:
             self._load(cfg)
 
@@ -112,6 +123,15 @@ class EvolutionLLM:
             )
         self.client = OpenAI(base_url=base_url, api_key=api_key)
         print(f"[evolution] provider=openai — model={self.model_id} base_url={base_url}")
+
+    def _load_openrouter(self) -> None:
+        from openai import OpenAI
+
+        api_key = os.environ.get("OPENROUTER_API_KEY")
+        if not api_key:
+            raise RuntimeError("Thiếu OPENROUTER_API_KEY cho evolution_llm.provider='openrouter'.")
+        self.client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=api_key)
+        print(f"[evolution] provider=openrouter — model={self.model_id}")
 
     def _load(self, cfg: dict) -> None:
         apply_turing_sdpa_patch()
@@ -141,20 +161,20 @@ class EvolutionLLM:
     def evolve(
         self, target_prompt: str, donor1: str, donor2: str, best_prompt: str
     ) -> str:
-        """1 request/offspring — trả prompt đã parse (theo code gốc: 1 request, temp 0.5)."""
+        """Sinh và bóc tách prompt con từ phản hồi của provider."""
         user_text = INSTRUCTION_TEMPLATE.format(
             prompt0=target_prompt, prompt1=donor1, prompt2=donor2, prompt3=best_prompt
         )
         if self.provider == "openai":
-            response = self._chat_openai(user_text)
+            response = self._request_chat(user_text)
+        elif self.provider == "openrouter":
+            response = self._request_chat(user_text, extra_body={"reasoning": {"enabled": True}})
         else:
             response = self._generate_local(user_text)
         return parse_final_prompt(response)
 
-    def _chat_openai(self, user_text: str) -> str:
-        """Gọi endpoint OpenAI-compatible. `max_tokens` (không phải
-        max_completion_tokens) vì endpoint của nhóm có thể là vLLM/proxy bên thứ ba —
-        tham số cũ được hỗ trợ rộng nhất."""
+    def _request_chat(self, user_text: str, **options) -> str:
+        """Gọi Chat Completions và trả nội dung phản hồi."""
         last_err: Exception | None = None
         for attempt in range(1, 4):  # DE chạy dài, endpoint có thể giật → thử lại 3 lần
             try:
@@ -164,6 +184,7 @@ class EvolutionLLM:
                     temperature=self.temperature,
                     top_p=self.top_p,
                     max_tokens=self.max_new_tokens,
+                    **options,
                 )
                 return resp.choices[0].message.content or ""
             except Exception as err:  # noqa: BLE001 — log rồi thử lại, hết lượt mới raise
