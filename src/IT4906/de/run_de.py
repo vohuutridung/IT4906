@@ -44,6 +44,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="EvoPrompt DE — Medical Findings Generation")
     parser.add_argument("--config", default="configs/de.yaml")
     parser.add_argument("--smoke", action="store_true", help="5 sample × 1 thế hệ")
+    parser.add_argument("--target-gpus", type=int, choices=(1, 2), help="số GPU chạy Target LLM")
     parser.add_argument(
         "--evolution-provider", choices=tuple(DEFAULT_EVOLUTION_MODELS),
         help="chọn provider của Evolution LLM",
@@ -75,6 +76,8 @@ def main() -> None:
         cfg["evolution_llm"]["provider"] = args.evolution_provider
     if args.evolution_model_id is not None:
         cfg["evolution_llm"]["model_id"] = args.evolution_model_id
+    if args.target_gpus is not None:
+        cfg["target_llm"]["num_gpus"] = args.target_gpus
 
     if args.smoke:
         cfg["data"]["num_samples"] = min(5, int(cfg["data"].get("num_samples", 200)))

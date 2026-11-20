@@ -141,6 +141,8 @@ Chạy thử qua OpenRouter với model mặc định:
 
 Log notebook cho biết thế hệ và ứng viên đang xử lý, số mẫu đã sinh Findings, bước tính từng metric và lúc lưu checkpoint. Các bước chờ lâu in thêm dòng `chưa hoàn tất` khoảng mỗi 15 giây. Khi resume, log cho biết phản hồi và điểm nào được dùng lại.
 
+Trên máy có hai GPU CUDA, thêm `--target-gpus 2` để đặt một bản MedGemma trên mỗi GPU. `target_llm.batch_size` là số mẫu mỗi GPU. Với `batch_size: 4`, hai GPU có thể xử lý cùng lúc 8 mẫu của một ứng viên, rồi ghép dự đoán đúng thứ tự trước khi tính fitness. Khi dùng greedy mặc định, có thể thêm cờ vào lệnh resume cùng `--work-root` để dùng lại checkpoint và cache. BERTScore vẫn ưu tiên GPU 1 trong bước chấm fitness, nên GPU này cần đủ bộ nhớ cho cả hai model.
+
 Thêm `--set data.num_samples 50` hoặc `--set de.iterations 3` để thử cấu hình nhỏ hơn. Dùng một `--work-root` riêng cho từng cấu hình thí nghiệm.
 
 **Cell 5. Đánh giá prompt tốt nhất trên test**
@@ -152,6 +154,8 @@ Thêm `--set data.num_samples 50` hoặc `--set de.iterations 3` để thử c�
 ```
 
 Cell đọc `best_prompt.json` và cấu hình đã lưu của run rồi dùng Target LLM sinh Findings trên toàn bộ `test`. Bước này dùng quyền tải Target LLM qua `HF_TOKEN`. Kết quả nằm trong `runs/de/test_eval/` dưới `--work-root`, gồm `metrics.json` với BERTScore F1, ROUGE-L F1, fitness và corpus BLEU (SacreBLEU, thang 0–100), cùng `predictions.jsonl` chứa dự đoán và tham chiếu theo từng mẫu. Fitness dùng để chọn prompt trên `val` được ghi riêng trong `selection_fitness`.
+
+Thêm `--target-gpus 2` để dùng cả hai GPU khi sinh Findings trên test, kể cả khi run đã được tiến hóa trên một GPU. Bỏ cờ sẽ dùng số GPU từ cấu hình lưu cùng run. Bước đánh giá giải phóng MedGemma trước khi tính metric trên toàn bộ kết quả đã ghép.
 
 Log đánh giá hiện số mẫu test có Findings sau mỗi batch, lúc nạp BERTScore, lúc tính BERTScore, ROUGE-L và BLEU, cùng đường dẫn `metrics.json`.
 

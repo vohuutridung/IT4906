@@ -25,7 +25,7 @@ from .data import DEFAULT_DATASET_ID, Sample, load_split, render_prompt
 from .evolution_llm import INSTRUCTION_TEMPLATE, EvolutionLLM, parse_final_prompt
 from .fitness import FitnessEvaluator
 from .progress import progress_stage
-from .target_llm import TargetLLM
+from .target_llm import TargetLLM, target_result_config
 
 
 INITIAL_MODES = ("human", "gpt", "random", "top", "bottom")
@@ -61,6 +61,8 @@ def run_fingerprint(cfg: dict) -> str:
     if de_cfg.get("initial_mode") == "randomk":
         de_cfg["initial_mode"] = "random"
     cfg2.get("fitness", {}).pop("device", None)
+    if "target_llm" in cfg2:
+        cfg2["target_llm"] = target_result_config(cfg2["target_llm"])
     payload = json.dumps(cfg2, sort_keys=True, ensure_ascii=False)
     return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:10]
 
@@ -85,14 +87,19 @@ class DERunner:
         dataset_dir = data_cfg.get("dataset_dir")
         dataset_id = data_cfg.get("dataset_id", DEFAULT_DATASET_ID)
         split = data_cfg.get("split", "val")
+        target_cfg = cfg["target_llm"]
         source = {"parquet": str(Path(dataset_dir).resolve())} if dataset_dir else {"hub": dataset_id}
-        data_key = json.dumps({"source": source, "split": split}, sort_keys=True)
+        cache_identity = {"source": source, "split": split}
+        sampling_gpus = target_result_config(target_cfg).get("num_gpus")
+        if sampling_gpus is not None:
+            cache_identity["sampling_gpus"] = sampling_gpus
+        data_key = json.dumps(cache_identity, sort_keys=True)
         data_fingerprint = hashlib.sha1(data_key.encode("utf-8")).hexdigest()[:10]
         cache_dir = str(self.out_dir / "cache" / data_fingerprint)
         num_samples = int(data_cfg.get("num_samples", 200))
         with progress_stage(f"[data] đọc tối đa {num_samples} mẫu, source={dataset_dir or dataset_id} split={split}"):
             self.samples: list[Sample] = load_split(dataset_dir, split, num_samples, dataset_id=dataset_id)
-        self.target = TargetLLM(cfg["target_llm"], cache_dir)
+        self.target = TargetLLM(target_cfg, cache_dir)
         self.fitness = FitnessEvaluator(cfg["fitness"], cache_dir)
         evolution_cfg = cfg["evolution_llm"]
         with progress_stage(f"[evolution] khởi tạo provider={evolution_cfg.get('provider', 'openai')}"):

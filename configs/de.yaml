@@ -11,6 +11,7 @@ data:
 
 target_llm:  # Model nhỏ sinh Findings để đánh giá prompt
   model_id: "google/medgemma-1.5-4b-it"
+  num_gpus: 1            # Dùng --target-gpus 2 để đặt một bản MedGemma trên mỗi GPU.
   batch_size: 4           # T4 + bf16: KV cache lớn theo batch — 4 an toàn VRAM (GPU ≥24GB có thể trả lại 16)
   max_new_tokens: 128     # official default
   # ⚠️ T4 KHÔNG chạy được fp16 cho MedGemma/Gemma3 (logits NaN → output rỗng — đã chẩn đoán 2026-11-11).

@@ -13,6 +13,7 @@ Modes:
   push-results Upload a results folder to the IT4906-TTTH dataset on Hugging Face.
 
 Options for smoke and evolve:
+  --target-gpus N     Replicate Target LLM on 1 or 2 CUDA GPUs (default: 1).
   --data-root PATH    Use attached Parquet files instead of streaming from Hugging Face.
   --work-root PATH    Write to PATH/runs/de or PATH/runs/de_smoke (default: /kaggle/working).
   --config PATH       DE YAML configuration (default: configs/de.yaml).
@@ -25,6 +26,7 @@ Options for smoke and evolve:
   -h, --help          Show this help.
 
 Options for evaluate:
+  --target-gpus N     Override the target GPU count saved with the run.
   --work-root PATH    Find the run at PATH/runs/de (default: /kaggle/working).
   --run-dir PATH      Read best_prompt.json and run_config.json from PATH instead.
   --data-root PATH    Override the saved Parquet dataset root for test evaluation.
@@ -51,6 +53,7 @@ work_root="/kaggle/working"
 config="configs/de.yaml"
 run_dir=""
 eval_num_samples=""
+target_gpus=""
 local_folder=""
 hf_folder=""
 overrides=()
@@ -61,7 +64,7 @@ while [[ $# -gt 0 ]]; do
             usage
             exit 0
             ;;
-        --mode|--data-root|--work-root|--config|--run-dir|--eval-num-samples|--local-folder|--hf-folder|--init-mode|--evolution-provider|--evolution-model-id)
+        --mode|--data-root|--work-root|--config|--run-dir|--eval-num-samples|--target-gpus|--local-folder|--hf-folder|--init-mode|--evolution-provider|--evolution-model-id)
             [[ $# -ge 2 && -n "$2" && "$2" != --* ]] || fail "$1 requires a value."
             case "$1" in
                 --mode) mode="$2" ;;
@@ -70,6 +73,7 @@ while [[ $# -gt 0 ]]; do
                 --config) config="$2" ;;
                 --run-dir) run_dir="$2" ;;
                 --eval-num-samples) eval_num_samples="$2" ;;
+                --target-gpus) target_gpus="$2" ;;
                 --local-folder) local_folder="$2" ;;
                 --hf-folder) hf_folder="$2" ;;
                 --init-mode) overrides+=(--set de.initial_mode "$2") ;;
@@ -96,6 +100,12 @@ if [[ "$mode" != push-results && ( -n "$local_folder" || -n "$hf_folder" ) ]]; t
     fail "--local-folder and --hf-folder are for push-results."
 fi
 
+target_args=()
+if [[ -n "$target_gpus" ]]; then
+    [[ "$target_gpus" == 1 || "$target_gpus" == 2 ]] || fail "--target-gpus must be 1 or 2."
+    target_args=(--target-gpus "$target_gpus")
+fi
+
 case "$mode" in
     setup)
         exec "$python_bin" -m pip install -r deployment/kaggle/requirements.txt
@@ -110,7 +120,7 @@ case "$mode" in
         if [[ "$mode" == smoke ]]; then
             args+=(--smoke)
         fi
-        exec "$python_bin" -u -m IT4906.de.run_de "${args[@]}" ${overrides[@]+"${overrides[@]}"}
+        exec "$python_bin" -u -m IT4906.de.run_de "${args[@]}" ${overrides[@]+"${overrides[@]}"} ${target_args[@]+"${target_args[@]}"}
         ;;
     evaluate)
         [[ -z "${overrides[*]:-}" ]] || fail "evaluate uses the saved config. See --help for evaluation options."
@@ -121,7 +131,7 @@ case "$mode" in
         if [[ -n "$eval_num_samples" ]]; then
             args+=(--num-samples "$eval_num_samples")
         fi
-        exec "$python_bin" -u -m IT4906.de.evaluate_de "${args[@]}"
+        exec "$python_bin" -u -m IT4906.de.evaluate_de "${args[@]}" ${target_args[@]+"${target_args[@]}"}
         ;;
     push-results)
         [[ -n "$local_folder" && -n "$hf_folder" ]] || fail "push-results requires --local-folder and --hf-folder."

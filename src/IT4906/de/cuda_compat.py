@@ -58,13 +58,16 @@ def apply_turing_sdpa_patch() -> bool:
     global _applied
     if _applied or not torch.cuda.is_available():
         return _applied
-    major, _ = torch.cuda.get_device_capability(0)
-    if major >= 8:
+    legacy_gpu = next(
+        (i for i in range(torch.cuda.device_count()) if torch.cuda.get_device_capability(i)[0] < 8),
+        None,
+    )
+    if legacy_gpu is None:
         return False
     F.scaled_dot_product_attention = _turing_sdpa
     _applied = True
     print(
-        f"[cuda_compat] GPU sm{major}x: bf16 không có kernel SDPA tiết kiệm VRAM "
+        f"[cuda_compat] cuda:{legacy_gpu}: bf16 không có kernel SDPA tiết kiệm VRAM "
         "(flash/mem-efficient cần sm80+) → attention tính trong fp16, trọng số vẫn "
         "bf16 — tránh OOM backend math O(n²)"
     )

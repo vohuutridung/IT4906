@@ -11,19 +11,25 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
+from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import nullcontext
 from pathlib import Path
 
 import torch
-from PIL import Image
 from transformers import AutoModelForImageTextToText, AutoProcessor
 
 from .cuda_compat import apply_turing_sdpa_patch
 from .data import SYSTEM_PROMPT, Sample
 from .progress import progress_stage
 
-GenCacheKey = tuple[str, str, int]  # (gen_config_fingerprint, rendered_prompt, sample.idx)
+
+def target_result_config(cfg: dict) -> dict:
+    """Keep GPU count in result identity only when it changes sampling RNG assignment."""
+    result = cfg.copy()
+    if not result.get("do_sample", False) or int(result.get("num_gpus", 1)) == 1:
+        result.pop("num_gpus", None)
+    return result
 
 
 def _key(gen_fp: str, prompt_text: str, sample_idx: int) -> str:
@@ -35,6 +41,12 @@ class TargetLLM:
     def __init__(self, cfg: dict, cache_dir: str):
         self.model_id: str = cfg["model_id"]
         self.batch_size: int = int(cfg.get("batch_size", 16))
+        self.num_gpus = int(cfg.get("num_gpus", 1))
+        if self.num_gpus not in (1, 2):
+            raise ValueError("target_llm.num_gpus phải là 1 hoặc 2.")
+        self._use_cuda = torch.cuda.is_available()
+        if self.num_gpus == 2 and (not self._use_cuda or torch.cuda.device_count() < 2):
+            raise ValueError("--target-gpus 2 cần hai GPU CUDA khả dụng.")
         self.max_new_tokens: int = int(cfg.get("max_new_tokens", 128))
         self.do_sample: bool = bool(cfg.get("do_sample", False))  # greedy mặc định cho eval
         self.dtype = getattr(torch, cfg.get("dtype", "bfloat16"))
@@ -42,12 +54,13 @@ class TargetLLM:
         # max_new_tokens → key khác → không bao giờ dùng lại output của cấu hình cũ.
         self._gen_fp = hashlib.sha1(
             json.dumps(
-                {
+                target_result_config({
                     "model_id": self.model_id,
                     "dtype": cfg.get("dtype", "bfloat16"),
                     "do_sample": self.do_sample,
                     "max_new_tokens": self.max_new_tokens,
-                },
+                    "num_gpus": self.num_gpus,
+                }),
                 sort_keys=True,
             ).encode("utf-8")
         ).hexdigest()[:10]
@@ -64,24 +77,25 @@ class TargetLLM:
                     if line.strip():
                         rec = json.loads(line)
                         self.cache[rec["k"]] = rec["v"]
-        self._flush_count = 0
         self._load()
+
+    @property
+    def parallel_batch_size(self) -> int:
+        return self.batch_size * self.num_gpus
 
     def _load(self) -> None:
         apply_turing_sdpa_patch()
-        with progress_stage(f"[target] tải processor {self.model_id}"):
-            self.processor = AutoProcessor.from_pretrained(self.model_id)
-        # Batched generate cho decoder-only cần LEFT padding, không phải right mặc định
-        self.processor.tokenizer.padding_side = "left"
-        # Ghim NGUYÊN model lên GPU 0 — KHÔNG dùng "auto": auto chia đều 2 GPU,
-        # khiến GPU 0 hết chỗ cho KV cache + activation khi evolution 27B nạp sau
-        # và chiếm nốt phần dư (đã OOM thật 2026-11-11).
-        device_map = {"": 0} if torch.cuda.is_available() else "auto"
-        with progress_stage(f"[target] nạp trọng số {self.model_id}"):
-            self.model = AutoModelForImageTextToText.from_pretrained(
-                self.model_id, dtype=self.dtype, device_map=device_map
-            )
-            self.model.eval()
+        self._replicas = []
+        for gpu in range(self.num_gpus):
+            placement = f"cuda:{gpu}" if self._use_cuda else "auto"
+            with progress_stage(f"[target] nạp {self.model_id} trên {placement}"):
+                processor = AutoProcessor.from_pretrained(self.model_id)
+                processor.tokenizer.padding_side = "left"
+                model = AutoModelForImageTextToText.from_pretrained(
+                    self.model_id, dtype=self.dtype, device_map={"": gpu} if self._use_cuda else "auto"
+                )
+                model.eval()
+                self._replicas.append((processor, model))
 
     def generate(self, prompt_text: str, sample: Sample) -> str:
         """Sinh Findings cho 1 sample. Có cache."""
@@ -98,24 +112,52 @@ class TargetLLM:
         if progress and not todo:
             print(f"{progress} Findings dùng cache {cached}/{len(pairs)} mẫu", flush=True)
         stage = (
-            progress_stage(f"{progress} sinh Findings cho {len(todo)} mẫu, cache {cached}/{len(pairs)}")
+            progress_stage(f"{progress} sinh Findings cho {len(todo)} mẫu với {self.num_gpus} bản model, "
+                           f"cache {cached}/{len(pairs)}")
             if progress and todo else nullcontext()
         )
         with stage:
-            for batch_no, i in enumerate(range(0, len(todo), self.batch_size), start=1):
-                chunk = todo[i : i + self.batch_size]
-                outs = self._generate_batch(chunk)
+            generated = 0
+            for batch_no, (chunk, outs) in enumerate(self._generate_missing(todo), start=1):
                 self._append_cache(
-                    [(_key(self._gen_fp, p, s.idx), o) for (p, s), o in zip(chunk, outs)]
+                    [(_key(self._gen_fp, p, s.idx), o) for (p, s), o in zip(chunk, outs, strict=True)]
                 )
-                generated = i + len(chunk)
+                generated += len(chunk)
                 if progress and (batch_no == 1 or batch_no % 10 == 0 or generated == len(todo)):
                     print(f"{progress} Findings {cached + generated}/{len(pairs)} mẫu", flush=True)
         # gộp kết quả theo thứ tự yêu cầu
         return [self.cache[_key(self._gen_fp, p, s.idx)] for p, s in pairs]
 
+    def _generate_missing(
+        self, pairs: list[tuple[str, Sample]]
+    ) -> Iterator[tuple[list[tuple[str, Sample]], list[str]]]:
+        chunks = [pairs[i : i + self.batch_size] for i in range(0, len(pairs), self.batch_size)]
+        if self.num_gpus == 1 or len(chunks) <= 1:
+            for chunk in chunks:
+                yield chunk, self._generate_batch(chunk)
+            return
+
+        with ThreadPoolExecutor(max_workers=self.num_gpus) as executor:
+            for i in range(0, len(chunks), self.num_gpus):
+                pending = {
+                    executor.submit(self._generate_batch, chunk, gpu): chunk
+                    for gpu, chunk in enumerate(chunks[i : i + self.num_gpus])
+                }
+                error = None
+                for future in as_completed(pending):
+                    try:
+                        results = future.result()
+                    except Exception as exc:
+                        if error is None:
+                            error = exc
+                    else:
+                        yield pending[future], results
+                if error is not None:
+                    raise error
+
     @torch.inference_mode()
-    def _generate_batch(self, pairs: list[tuple[str, Sample]]) -> list[str]:
+    def _generate_batch(self, pairs: list[tuple[str, Sample]], replica_index: int = 0) -> list[str]:
+        processor, model = self._replicas[replica_index]
         conversations = []
         for prompt_text, sample in pairs:
             conversations.append(
@@ -133,19 +175,19 @@ class TargetLLM:
                     },
                 ]
             )
-        prompts_text = self.processor.apply_chat_template(
+        prompts_text = processor.apply_chat_template(
             conversations, add_generation_prompt=True, tokenize=False
         )
         images = [[s.image] for _, s in pairs]
-        inputs = self.processor(
-            text=prompts_text, images=images, padding=True, return_tensors="pt"
-        ).to(self.model.device)
+        inputs = processor(text=prompts_text, images=images, padding=True, return_tensors="pt")
         gen_kwargs: dict = dict(max_new_tokens=self.max_new_tokens)
         if self.do_sample:
             gen_kwargs.update(do_sample=True, top_k=0, top_p=0.95)
-        output = self.model.generate(**inputs, **gen_kwargs)
-        trimmed = output[:, inputs["input_ids"].shape[1]:]
-        decoded = self.processor.batch_decode(trimmed, skip_special_tokens=True)
+        with torch.cuda.device(replica_index) if self._use_cuda else nullcontext():
+            inputs = inputs.to(model.device)
+            output = model.generate(**inputs, **gen_kwargs)
+            trimmed = output[:, inputs["input_ids"].shape[1]:]
+            decoded = processor.batch_decode(trimmed, skip_special_tokens=True)
         return [d.strip() for d in decoded]
 
     def _append_cache(self, records: list[tuple[str, str]]) -> None:

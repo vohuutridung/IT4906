@@ -8,6 +8,7 @@ import json
 from itertools import islice
 from pathlib import Path
 
+import torch
 import yaml
 from sacrebleu.metrics import BLEU
 
@@ -16,10 +17,12 @@ from .data import DEFAULT_DATASET_ID, iter_split, render_prompt
 from .fitness import FitnessEvaluator
 from .progress import progress_stage
 from .run_de import load_env, set_seed
-from .target_llm import TargetLLM
+from .target_llm import TargetLLM, target_result_config
 
 
-def evaluate(run_dir: Path, config_path: Path, data_root: str | None, limit: int | None) -> dict:
+def evaluate(
+    run_dir: Path, config_path: Path, data_root: str | None, limit: int | None, *, target_gpus: int | None = None
+) -> dict:
     if limit is not None and limit < 1:
         raise ValueError("--num-samples phải lớn hơn 0.")
 
@@ -45,16 +48,19 @@ def evaluate(run_dir: Path, config_path: Path, data_root: str | None, limit: int
     eval_dir = run_dir / ("test_eval" if limit is None else f"test_eval_first_{limit}")
     set_seed(int(config.get("seed", 5)))
 
+    target_cfg = config["target_llm"].copy()
+    if target_gpus is not None:
+        target_cfg["num_gpus"] = target_gpus
     # Tách cache test khỏi các mẫu validation và khỏi các cấu hình target khác.
-    cache_key = json.dumps([dataset_id, dataset_dir, config["target_llm"]], sort_keys=True)
+    cache_key = json.dumps([dataset_id, dataset_dir, target_result_config(target_cfg)], sort_keys=True)
     cache_path = eval_dir / "cache" / hashlib.sha256(cache_key.encode("utf-8")).hexdigest()[:16]
-    print(f"[test] source={dataset_dir or dataset_id} split=test target={config['target_llm']['model_id']}", flush=True)
-    target = TargetLLM(config["target_llm"], str(cache_path))
+    print(f"[test] source={dataset_dir or dataset_id} split=test target={target_cfg['model_id']}", flush=True)
+    target = TargetLLM(target_cfg, str(cache_path))
     metric = FitnessEvaluator(config["fitness"], str(cache_path))
     samples = iter_split(dataset_dir, "test", limit, dataset_id=dataset_id)
     rows = []
     with progress_stage("[test] đọc mẫu và sinh Findings"):
-        while batch := list(islice(samples, target.batch_size)):
+        while batch := list(islice(samples, target.parallel_batch_size)):
             pairs = [(render_prompt(prompt, sample), sample) for sample in batch]
             predictions = target.generate_batch(pairs)
             rows.extend(
@@ -64,6 +70,9 @@ def evaluate(run_dir: Path, config_path: Path, data_root: str | None, limit: int
             print(f"[test] đã có Findings cho {len(rows)} mẫu", flush=True)
     if not rows:
         raise ValueError("Không tìm thấy mẫu trong split test.")
+    del target
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
     with progress_stage(f"[test] lưu {len(rows)} dự đoán vào predictions.jsonl"):
         write_text_atomic(eval_dir / "predictions.jsonl", "".join(
@@ -85,7 +94,7 @@ def evaluate(run_dir: Path, config_path: Path, data_root: str | None, limit: int
         "best_prompt": prompt,
         "selection_split": selection_split,
         "selection_fitness": best.get("best_fitness"),
-        "target_llm": config["target_llm"],
+        "target_llm": target_cfg,
         "fitness_config": config["fitness"],
         "metrics": {**scores, "bleu": bleu_score},
         "bleu_signature": str(bleu.get_signature()),
@@ -101,9 +110,10 @@ def main() -> None:
     parser.add_argument("--config", type=Path, default=Path("configs/de.yaml"))
     parser.add_argument("--data-root")
     parser.add_argument("--num-samples", type=int)
+    parser.add_argument("--target-gpus", type=int, choices=(1, 2), help="số GPU chạy Target LLM")
     args = parser.parse_args()
     load_env()
-    evaluate(args.run_dir, args.config, args.data_root, args.num_samples)
+    evaluate(args.run_dir, args.config, args.data_root, args.num_samples, target_gpus=args.target_gpus)
 
 
 if __name__ == "__main__":
