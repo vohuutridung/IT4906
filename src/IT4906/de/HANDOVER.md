@@ -54,6 +54,7 @@ nhận (file `.env` chỉ được nạp nếu có, không ghi đè biến có s
 
 ⚠️ Với `openai`: `evolution_llm.model_id` phải là **tên model của endpoint** (chờ người
 cung cấp endpoint chốt). Retry 3 lần tự động khi endpoint giật.
+`--evolution-model-id ID` ghi đè ID trong YAML cho lần chạy hiện tại. Cờ này dùng được với CLI Python và script Kaggle. Với `local`, truyền ID repo Hugging Face.
 
 ## 5. Chạy
 
@@ -101,7 +102,7 @@ os.environ["EVOLUTION_LLM_BASE_URL"] = secrets.get_secret("EVOLUTION_LLM_BASE_UR
 os.environ["EVOLUTION_LLM_API_KEY"] = secrets.get_secret("EVOLUTION_LLM_API_KEY")
 ```
 
-`HF_TOKEN` cần có quyền tải target model. Nếu dùng Evolution LLM local, bỏ hai dòng `EVOLUTION_LLM_*`, dùng `--set evolution_llm.provider local` và đặt model ID theo repo Hugging Face đã được cấp quyền.
+`HF_TOKEN` cần có quyền tải target model. Nếu dùng Evolution LLM local, bỏ hai dòng `EVOLUTION_LLM_*`, thêm `--set evolution_llm.provider local` và dùng `--evolution-model-id` với ID repo Hugging Face đã được cấp quyền.
 
 **Cell 3. Chạy thử**
 
@@ -111,7 +112,7 @@ Thay `MODEL_ID_CUA_ENDPOINT` bằng tên model mà endpoint cung cấp.
 !bash deployment/kaggle/run.sh \
   --mode smoke \
   --work-root /kaggle/working/it4906 \
-  --set evolution_llm.model_id MODEL_ID_CUA_ENDPOINT
+  --evolution-model-id MODEL_ID_CUA_ENDPOINT
 ```
 
 **Cell 4. Chạy đầy đủ**
@@ -120,7 +121,7 @@ Thay `MODEL_ID_CUA_ENDPOINT` bằng tên model mà endpoint cung cấp.
 !bash deployment/kaggle/run.sh \
   --mode evolve \
   --work-root /kaggle/working/it4906 \
-  --set evolution_llm.model_id MODEL_ID_CUA_ENDPOINT
+  --evolution-model-id MODEL_ID_CUA_ENDPOINT
 ```
 
 `smoke` ghi vào `/kaggle/working/it4906/runs/de_smoke/`, còn `evolve` ghi vào `/kaggle/working/it4906/runs/de/`. Kết quả cuối là `best_prompt.json`. Để tiếp tục ở session mới, chép thư mục kết quả cũ vào đúng thư mục output và gọi lại `evolve` với cấu hình cũ. Runner tự tìm `checkpoint.json`.

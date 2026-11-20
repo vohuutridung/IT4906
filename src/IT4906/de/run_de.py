@@ -44,10 +44,15 @@ def main() -> None:
     parser.add_argument("--config", default="configs/de.yaml")
     parser.add_argument("--smoke", action="store_true", help="5 sample × 1 thế hệ")
     parser.add_argument(
+        "--evolution-model-id", metavar="ID", help="ghi đè model_id của Evolution LLM",
+    )
+    parser.add_argument(
         "--set", nargs=2, action="append", metavar=("KEY", "VALUE"),
         help="ghi đè config, VD: --set data.num_samples 50",
     )
     args = parser.parse_args()
+    if args.evolution_model_id is not None and not args.evolution_model_id.strip():
+        parser.error("--evolution-model-id cần một ID model.")
 
     load_env()
 
@@ -60,6 +65,9 @@ def main() -> None:
         for p in parts[:-1]:
             node = node[p]
         node[parts[-1]] = yaml.safe_load(value)  # cast kiểu theo YAML
+
+    if args.evolution_model_id is not None:
+        cfg["evolution_llm"]["model_id"] = args.evolution_model_id
 
     if args.smoke:
         cfg["data"]["num_samples"] = min(5, int(cfg["data"].get("num_samples", 200)))
