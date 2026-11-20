@@ -23,7 +23,7 @@ import numpy as np
 from .artifacts import write_json
 from .data import DEFAULT_DATASET_ID, Sample, load_split, render_prompt
 from .evolution_llm import INSTRUCTION_TEMPLATE, EvolutionLLM, parse_final_prompt
-from .fitness import FitnessEvaluator
+from .fitness import FitnessEvaluator, check_metric_dependencies
 from .progress import progress_stage
 from .target_llm import TargetLLM, target_result_config
 
@@ -81,6 +81,7 @@ class DERunner:
             raise ValueError(f"initial_mode '{initial_mode}' không hợp lệ. Chọn {', '.join(INITIAL_MODES)}.")
         if self.N < 1 or (self.T > 0 and self.N < 4):
             raise ValueError("population_size phải dương và cần ít nhất 4 prompt khi chạy thế hệ DE.")
+        check_metric_dependencies()
         self.donor_random: bool = bool(cfg["de"].get("donor_random", False))
 
         data_cfg = cfg["data"]

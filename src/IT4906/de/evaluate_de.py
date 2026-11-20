@@ -10,11 +10,10 @@ from pathlib import Path
 
 import torch
 import yaml
-from sacrebleu.metrics import BLEU
 
 from .artifacts import write_json, write_text_atomic
 from .data import DEFAULT_DATASET_ID, iter_split, render_prompt
-from .fitness import FitnessEvaluator
+from .fitness import FitnessEvaluator, check_metric_dependencies
 from .progress import progress_stage
 from .run_de import load_env, set_seed
 from .target_llm import TargetLLM, target_result_config
@@ -25,6 +24,9 @@ def evaluate(
 ) -> dict:
     if limit is not None and limit < 1:
         raise ValueError("--num-samples phải lớn hơn 0.")
+
+    check_metric_dependencies(include_bleu=True)
+    from sacrebleu.metrics import BLEU
 
     best = json.loads((run_dir / "best_prompt.json").read_text(encoding="utf-8"))
     prompt = best["best_prompt"]

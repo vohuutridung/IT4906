@@ -11,12 +11,33 @@ from __future__ import annotations
 
 import hashlib
 import json
+from importlib import import_module
 from pathlib import Path
-
-from rouge_score import rouge_scorer
 
 from .artifacts import write_json
 from .progress import progress_stage
+
+
+def check_metric_dependencies(*, include_bleu: bool = False) -> None:
+    """Kiểm tra thư viện tính điểm trước khi nạp Target LLM."""
+    modules = [("bert_score", "bert-score"), ("rouge_score.rouge_scorer", "rouge-score")]
+    if include_bleu:
+        modules.append(("sacrebleu.metrics", "sacrebleu"))
+
+    missing = []
+    for module, package in modules:
+        try:
+            import_module(module)
+        except ModuleNotFoundError as exc:
+            if exc.name != module.split(".", 1)[0]:
+                raise
+            missing.append(package)
+
+    if missing:
+        raise ModuleNotFoundError(
+            f"Thiếu thư viện tính điểm: {', '.join(missing)}. "
+            "Chạy `bash deployment/kaggle/run.sh --mode setup` với cùng PYTHON_BIN rồi thử lại."
+        )
 
 
 def _metric_fingerprint(cfg: dict) -> str:
@@ -38,6 +59,8 @@ def _metric_fingerprint(cfg: dict) -> str:
 
 class FitnessEvaluator:
     def __init__(self, cfg: dict, cache_dir: str):
+        from rouge_score import rouge_scorer
+
         self.bertscore_model: str = cfg["bertscore_model"]
         self.bertscore_lang: str | None = cfg.get("bertscore_lang")
         self.rouge_type: str = cfg.get("rouge_type", "rougeL")
