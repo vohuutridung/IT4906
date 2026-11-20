@@ -53,8 +53,12 @@ class TargetLLM:
         self.cache_path.parent.mkdir(parents=True, exist_ok=True)
         self.cache: dict[str, str] = {}
         if self.cache_path.exists():
-            with open(self.cache_path, encoding="utf-8") as f:
-                for line in f:
+            with self.cache_path.open("r+b") as f:
+                while line := f.readline():
+                    if not line.endswith(b"\n"):
+                        # Tiến trình trước có thể bị ngắt khi đang ghi dòng cuối.
+                        f.truncate(f.tell() - len(line))
+                        break
                     if line.strip():
                         rec = json.loads(line)
                         self.cache[rec["k"]] = rec["v"]

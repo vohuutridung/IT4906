@@ -6,7 +6,7 @@
   3, replace=False) (candidates = population trừ target), c = best nếu donor_random=False.
 - Offspring chỉ thay target nếu fitness(offspring) > fitness(target) (tie giữ old).
 - p_best cập nhật NGAY theo từng offspring, điều kiện strict `>`.
-- Checkpoint sau mỗi thế hệ -> resume được khi session Kaggle đứt.
+- Checkpoint theo thế hệ, lưu riêng từng phản hồi để resume giữa thế hệ.
 """
 
 from __future__ import annotations
@@ -16,11 +16,13 @@ import json
 import random
 import time
 from pathlib import Path
+from uuid import uuid4
 
 import numpy as np
 
+from .artifacts import write_json
 from .data import DEFAULT_DATASET_ID, Sample, load_split, render_prompt
-from .evolution_llm import EvolutionLLM
+from .evolution_llm import INSTRUCTION_TEMPLATE, EvolutionLLM, parse_final_prompt
 from .fitness import FitnessEvaluator
 from .target_llm import TargetLLM
 
@@ -98,10 +100,16 @@ class DERunner:
         self.evaluated: dict[str, dict] = {}  # prompt -> {"fitness", "bertscore_f1", "rougeL_f1"}
         self.history: list[dict] = []
         self.checkpoint_path = self.out_dir / "checkpoint.json"
-        self._run_fp = run_fingerprint({
+        self.effective_config = {
             **cfg,
             "evolution_llm": {**evolution_cfg, "model_id": self.evolution.model_id},
-        })
+        }
+        self._run_fp = run_fingerprint(self.effective_config)
+        self.run_id = uuid4().hex
+
+    @property
+    def audit_dir(self) -> Path:
+        return self.out_dir / "evolution" / self.run_id
 
     # ---------- evaluation ----------
     def evaluate_prompt(self, prompt_text: str, samples: list[Sample] | None = None) -> dict:
@@ -144,7 +152,10 @@ class DERunner:
 
     # ---------- checkpoint ----------
     def _save_checkpoint(self, step_done: int, population: list[str], best_prompt: str, best_score: float) -> None:
+        rng = list(np.random.get_state())
+        rng[1] = rng[1].tolist()
         ckpt = {
+            "run_id": self.run_id,
             "run_fp": self._run_fp,
             "step_done": step_done,
             "population": population,
@@ -152,10 +163,9 @@ class DERunner:
             "best_score": best_score,
             "evaluated_prompts": self.evaluated,
             "history": self.history,
+            "numpy_random_state": rng,
         }
-        tmp = self.checkpoint_path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(ckpt, ensure_ascii=False), encoding="utf-8")
-        tmp.replace(self.checkpoint_path)
+        write_json(self.checkpoint_path, ckpt)
 
     def _try_resume(self) -> tuple[int, list[str], str, float] | None:
         if not self.checkpoint_path.exists():
@@ -174,23 +184,54 @@ class DERunner:
             return None
         self.evaluated = ckpt["evaluated_prompts"]
         self.history = ckpt["history"]
+        rng = ckpt.get("numpy_random_state")
+        if rng is not None:
+            np.random.set_state((rng[0], np.asarray(rng[1], dtype=np.uint32), *rng[2:]))
+        if "run_id" in ckpt:
+            self.run_id = ckpt["run_id"]
+        else:
+            # Cho phép tiếp tục checkpoint cũ và gắn kho lưu mới trước lần gọi API tiếp theo.
+            self._save_checkpoint(ckpt["step_done"], ckpt["population"], ckpt["best_prompt"], ckpt["best_score"])
         print(
             f"[resume] từ sau thế hệ {ckpt['step_done']} — population {len(ckpt['population'])}, "
             f"best={ckpt['best_score']:.4f}"
         )
         return ckpt["step_done"], ckpt["population"], ckpt["best_prompt"], ckpt["best_score"]
 
+    def _save_run_config(self) -> None:
+        snapshot = {"run_id": self.run_id, "run_fp": self._run_fp, "config": self.effective_config}
+        write_json(self.out_dir / "run_config.json", snapshot)
+        archived_config = self.audit_dir / "run_config.json"
+        if not archived_config.exists():
+            write_json(archived_config, {**snapshot, "evolution_instruction": INSTRUCTION_TEMPLATE})
+
+    def _proposal(self, path: Path, target: str, donors: list[str]) -> dict:
+        if path.exists():
+            record = json.loads(path.read_text(encoding="utf-8"))
+            if record["target"] != target or record["donors"] != donors:
+                raise RuntimeError(f"Donor hoặc target không khớp với phản hồi đã lưu trong {path}.")
+            print(f"[resume] dùng lại phản hồi {path.parent.name}/{path.name}")
+            return record
+        response = self.evolution.generate_response(target, *donors)
+        record = {"target": target, "donors": donors, "raw_response": response}
+        write_json(path, record)
+        return record
+
     # ---------- main loop ----------
     def run(self) -> dict:
         t0 = time.time()
         print(f"[init] dev samples: {len(self.samples)}")
         resumed = self._try_resume()
+        self._save_run_config()
         if resumed is None:
             population = self._initialize_population()
             best_prompt = max(population, key=lambda p: self.evaluated[p]["fitness"])
             best_score = self.evaluated[best_prompt]["fitness"]
             print(f"[P0] mode={self.initial_mode}, size={len(population)}, best={best_score:.4f}")
             step_done = 0  # lần đầu chạy: chưa có thế hệ nào hoàn thành
+            write_json(self.audit_dir / "initial_population.json", {
+                "population": population, "evaluated_prompts": self.evaluated,
+            })
             self._save_checkpoint(0, population, best_prompt, best_score)
         else:
             step_done, population, best_prompt, best_score = resumed
@@ -209,33 +250,27 @@ class DERunner:
                 a, b, c = np.random.choice(candidates, 3, replace=False)
                 if not self.donor_random:
                     c = best_prompt
-                offspring = self.evolution.evolve(target_prompt=old, donor1=a, donor2=b, best_prompt=c)
-                if not offspring.strip():
-                    print(
-                        f"[gen {step} pop {j + 1}/{self.N}] cảnh báo: offspring rỗng từ Evolution LLM "
-                        "→ giữ target, bỏ qua eval (tiết kiệm 1 lần eval GPU)"
+                path = self.audit_dir / f"gen_{step:03d}" / f"slot_{j + 1:03d}.json"
+                record = self._proposal(path, old, [str(a), str(b), str(c)])
+                if "offspring_scores" not in record:
+                    offspring = parse_final_prompt(record["raw_response"])
+                    off_scores = None
+                    if offspring.strip():
+                        off_scores = self.evaluated.get(offspring)
+                        if off_scores is None:
+                            off_scores = self.evaluate_prompt(offspring)
+                    kept = off_scores is not None and off_scores["fitness"] > old_scores["fitness"]
+                    record.update(
+                        offspring=offspring, old_scores=old_scores, offspring_scores=off_scores,
+                        kept=kept, selected=offspring if kept else old,
                     )
-                    gen_log["offspring"].append(
-                        {
-                            "target": old,
-                            "donors": [str(a), str(b), str(c)],
-                            "offspring": "",
-                            "old_fitness": old_scores["fitness"],
-                            "offspring_fitness": None,
-                            "kept": False,
-                        }
-                    )
-                    new_pop.append(old)
-                    continue
-                off_scores = self.evaluated.get(offspring)
-                if off_scores is None:
-                    off_scores = self.evaluate_prompt(offspring)
+                    write_json(path, record)
+
+                offspring, off_scores = record["offspring"], record["offspring_scores"]
+                if off_scores is not None:
                     self.evaluated[offspring] = off_scores
-                # greedy pairwise — tie giữ old (khớp max(cur_candidates) với old chèn trước)
-                if off_scores["fitness"] > old_scores["fitness"]:
-                    selected, selected_scores = offspring, off_scores
-                else:
-                    selected, selected_scores = old, old_scores
+                selected = record["selected"]
+                selected_scores = self.evaluated[selected]
                 # p_best update NGAY theo từng offspring, strict >
                 if selected_scores["fitness"] > best_score:
                     best_score = selected_scores["fitness"]
@@ -244,42 +279,39 @@ class DERunner:
                 gen_log["offspring"].append(
                     {
                         "target": old,
-                        "donors": [str(a), str(b), str(c)],
+                        "donors": record["donors"],
                         "offspring": offspring,
                         "old_fitness": old_scores["fitness"],
-                        "offspring_fitness": off_scores["fitness"],
-                        "kept": selected == offspring,
+                        "offspring_fitness": off_scores["fitness"] if off_scores is not None else None,
+                        "kept": record["kept"],
+                        "record_path": str(path.relative_to(self.out_dir)),
                     }
                 )
-                print(
-                    f"[gen {step} pop {j + 1}/{self.N}] old={old_scores['fitness']:.4f} "
-                    f"off={off_scores['fitness']:.4f} -> {'giữ offspring' if selected == offspring else 'giữ target'} "
-                    f"(best {best_score:.4f})"
-                )
+                off_display = f"{off_scores['fitness']:.4f}" if off_scores is not None else "rỗng"
+                decision = "giữ offspring" if record["kept"] else "giữ target"
+                print(f"[gen {step} pop {j + 1}/{self.N}] old={old_scores['fitness']:.4f} "
+                      f"off={off_display} -> {decision} (best {best_score:.4f})")
             population = new_pop
             avg = sum(self.evaluated[p]["fitness"] for p in population) / len(population)
             gen_log["best_score"] = best_score
             gen_log["avg_score"] = avg
             self.history.append(gen_log)
+            summary = {
+                "population": population,
+                "scores": [self.evaluated[p] for p in population],
+                "best_score": best_score,
+                "avg_score": avg,
+            }
+            write_json(self.out_dir / f"step{step}_pop.json", summary)
+            write_json(self.audit_dir / f"gen_{step:03d}" / "population.json", summary)
             self._save_checkpoint(step, population, best_prompt, best_score)
-            (self.out_dir / f"step{step}_pop.json").write_text(
-                json.dumps(
-                    {
-                        "population": population,
-                        "scores": [self.evaluated[p] for p in population],
-                        "best_score": best_score,
-                        "avg_score": avg,
-                    },
-                    ensure_ascii=False,
-                    indent=2,
-                ),
-                encoding="utf-8",
-            )
             print(f"[gen {step} done] best={best_score:.4f} avg={avg:.4f} ({time.time() - t0:.0f}s)")
         return self._finish(self.T, population, best_prompt, best_score, t0)
 
     def _finish(self, step_done: int, population: list[str], best_prompt: str, best_score: float, t0: float) -> dict:
         result = {
+            "run_id": self.run_id,
+            "run_fp": self._run_fp,
             "best_prompt": best_prompt,
             "best_fitness": best_score,
             "steps_done": step_done,
@@ -289,8 +321,7 @@ class DERunner:
             ],
             "elapsed_sec": time.time() - t0,
         }
-        (self.out_dir / "best_prompt.json").write_text(
-            json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        write_json(self.audit_dir / "best_prompt.json", result)
+        write_json(self.out_dir / "best_prompt.json", result)
         print(f"[DONE] best fitness={best_score:.4f}\n--- BEST PROMPT ---\n{best_prompt}")
         return result

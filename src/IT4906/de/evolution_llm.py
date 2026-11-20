@@ -162,6 +162,12 @@ class EvolutionLLM:
         self, target_prompt: str, donor1: str, donor2: str, best_prompt: str
     ) -> str:
         """Sinh và bóc tách prompt con từ phản hồi của provider."""
+        return parse_final_prompt(self.generate_response(target_prompt, donor1, donor2, best_prompt))
+
+    def generate_response(
+        self, target_prompt: str, donor1: str, donor2: str, best_prompt: str
+    ) -> str:
+        """Trả nội dung phản hồi nguyên văn để có thể lưu trước khi bóc tách."""
         user_text = INSTRUCTION_TEMPLATE.format(
             prompt0=target_prompt, prompt1=donor1, prompt2=donor2, prompt3=best_prompt
         )
@@ -171,7 +177,7 @@ class EvolutionLLM:
             response = self._request_chat(user_text, extra_body={"reasoning": {"enabled": True}})
         else:
             response = self._generate_local(user_text)
-        return parse_final_prompt(response)
+        return response
 
     def _request_chat(self, user_text: str, **options) -> str:
         """Gọi Chat Completions và trả nội dung phản hồi."""

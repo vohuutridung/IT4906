@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import glob
 import os
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
 
@@ -60,14 +61,14 @@ def find_parquet_files(dataset_dir: str, split: str) -> list[str]:
     )
 
 
-def load_split(
+def iter_split(
     dataset_dir: str | None,
     split: str,
     num_samples: int | None = None,
     *,
     dataset_id: str = DEFAULT_DATASET_ID,
-) -> list[Sample]:
-    """Đọc các mẫu đầu của split từ Parquet local hoặc stream từ Hugging Face."""
+) -> Iterator[Sample]:
+    """Đọc lần lượt các mẫu từ Parquet local hoặc stream từ Hugging Face."""
     if dataset_dir:
         files = find_parquet_files(dataset_dir, split)
         rows = load_dataset("parquet", data_files={split: files}, split=split)
@@ -77,7 +78,6 @@ def load_split(
         rows = load_dataset(dataset_id, split=split, streaming=True)
         if num_samples is not None:
             rows = rows.take(num_samples)
-    samples: list[Sample] = []
     for i, row in enumerate(rows):
         meta = {
             "Ages": str(row["Ages"]),
@@ -86,15 +86,22 @@ def load_split(
             "Ghi chú": str(row["Ghi chú"]),
             "Kỹ thuật": str(row["Kỹ thuật"]),
         }
-        samples.append(
-            Sample(
-                idx=i,
-                meta=meta,
-                image=row["image"],
-                findings_gt=str(row["findings"]).strip(),
-            )
+        yield Sample(
+            idx=i,
+            meta=meta,
+            image=row["image"],
+            findings_gt=str(row["findings"]).strip(),
         )
-    return samples
+
+
+def load_split(
+    dataset_dir: str | None,
+    split: str,
+    num_samples: int | None = None,
+    *,
+    dataset_id: str = DEFAULT_DATASET_ID,
+) -> list[Sample]:
+    return list(iter_split(dataset_dir, split, num_samples, dataset_id=dataset_id))
 
 
 def render_prompt(template: str, sample: Sample, append_metadata: bool = True) -> str:

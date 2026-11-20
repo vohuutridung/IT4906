@@ -31,7 +31,7 @@ uv sync                     # deps trong pyproject + tự cài package (editable
 
 # Deps nặng CHƯA đưa vào pyproject (file dùng chung với nhóm GA — chờ xác nhận).
 # Cài riêng trên MÁY CHẠY (local/dev100/Kaggle):
-uv pip install torch transformers accelerate bitsandbytes datasets pillow bert_score rouge-score pyyaml
+uv pip install torch transformers accelerate bitsandbytes datasets pillow bert_score rouge-score sacrebleu pyyaml
 
 # Credential Evolution LLM — KHÔNG hardcode vào code:
 cp .env.example .env        # rồi điền giá trị thật vào 2 biến (xem §4)
@@ -141,6 +141,31 @@ Chạy thử qua OpenRouter với model mặc định:
 
 Thêm `--set data.num_samples 50` hoặc `--set de.iterations 3` để thử cấu hình nhỏ hơn. Dùng một `--work-root` riêng cho từng cấu hình thí nghiệm.
 
+**Cell 5. Đánh giá prompt tốt nhất trên test**
+
+```python
+!bash deployment/kaggle/run.sh \
+  --mode evaluate \
+  --work-root /kaggle/working/it4906
+```
+
+Cell đọc `best_prompt.json` và cấu hình đã lưu của run rồi dùng Target LLM sinh Findings trên toàn bộ `test`. Bước này dùng quyền tải Target LLM qua `HF_TOKEN`. Kết quả nằm trong `runs/de/test_eval/` dưới `--work-root`, gồm `metrics.json` với BERTScore F1, ROUGE-L F1, fitness và corpus BLEU (SacreBLEU, thang 0–100), cùng `predictions.jsonl` chứa dự đoán và tham chiếu theo từng mẫu. Fitness dùng để chọn prompt trên `val` được ghi riêng trong `selection_fitness`.
+
+`--run-dir PATH` chọn thư mục run khác. `--eval-num-samples 5` đánh giá thử 5 mẫu đầu và lưu riêng trong `test_eval_first_5/`. Với kết quả cũ chưa có cấu hình lưu kèm, dùng `--config PATH` trỏ đến YAML đã dùng cho run đó. Nếu đã chạy `setup` trước khi có bước này, chạy lại `setup` để cài SacreBLEU.
+
+**Cell 6. Đẩy toàn bộ thư mục kết quả lên Hugging Face**
+
+Nạp `HF_TOKEN` có quyền ghi vào dataset `vohuutridung/IT4906-TTTH` trước khi chạy.
+
+```python
+!bash deployment/kaggle/run.sh \
+  --mode push-results \
+  --local-folder /kaggle/working/it4906/runs/de \
+  --hf-folder runs/qwen35-9b
+```
+
+Nội dung `runs/de/`, gồm các thư mục con, được đưa trực tiếp vào `runs/qwen35-9b/` của repo. Script in URL commit sau khi upload.
+
 ### Chọn chiến lược khởi tạo quần thể
 
 Dùng `--init-mode` trong script Kaggle hoặc `--set de.initial_mode` với CLI Python.
@@ -161,12 +186,16 @@ Tất cả nằm trong `runs/de/` (hoặc thư mục `de.cache_dir`):
 
 | File | Vai trò |
 |---|---|
-| `checkpoint.json` | Lưu sau MỖI thế hệ. Chạy lại **cùng config** → tự resume, không mất công cũ |
+| `checkpoint.json` | Lưu quần thể, lịch sử và trạng thái chọn donor của NumPy sau mỗi thế hệ |
+| `run_config.json` | Cấu hình thực tế sau khi áp dụng các cờ CLI, gồm model ID và mã run |
+| `evolution/<run_id>/` | Cấu hình kèm template, quần thể khởi tạo, phản hồi nguyên văn của từng ứng viên, điểm, quyết định giữ hoặc thay prompt, và kết quả cuối |
 | `checkpoint_stale.json` | Checkpoint sinh từ config KHÁC bị đổi tên thế này (chống trộn fitness 2 thang đo) — có thể xóa |
 | `cache/<data_fp>/gen_cache_<fp>.jsonl` | Cache generation target 4B, tách theo nguồn dữ liệu, split và cấu hình sinh |
 | `cache/<data_fp>/fitness_cache_<fp>.json` | Cache điểm fitness, tách theo nguồn dữ liệu, split và cấu hình metric |
 | `stepN_pop.json` | Population + điểm sau mỗi thế hệ |
 | `best_prompt.json` | **Kết quả cuối**: best_prompt, best_fitness, final_population có điểm từng prompt |
+
+Mỗi phản hồi Evolution LLM được ghi trước khi chấm điểm. Khi bị ngắt giữa thế hệ, runner đọc lại các phản hồi đã lưu và chỉ chấm những ứng viên chưa ghi điểm. Chép cả thư mục run để giữ checkpoint, cache và lịch sử. Checkpoint cũ vẫn có thể tiếp tục từ thế hệ đã lưu, với lưu vết theo ứng viên bắt đầu từ lần resume đó.
 
 Muốn chạy lại từ đầu: **đổi `de.cache_dir`** (VD `runs/de_v2`) — đừng xóa cache cũ (tra cứu so sánh).
 Smoke luôn ghi vào `runs/de_smoke/`, không đụng full run.

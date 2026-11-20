@@ -15,6 +15,8 @@ from pathlib import Path
 
 from rouge_score import rouge_scorer
 
+from .artifacts import write_json
+
 
 def _metric_fingerprint(cfg: dict) -> str:
     payload = json.dumps(
@@ -125,6 +127,4 @@ class FitnessEvaluator:
         return rec
 
     def _save(self) -> None:
-        self.cache_path.write_text(
-            json.dumps(self.cache, ensure_ascii=False, indent=0), encoding="utf-8"
-        )
+        write_json(self.cache_path, self.cache)

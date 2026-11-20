@@ -31,7 +31,7 @@ Mở `data/med_findings_gen/EDA/01_vnmedical_data_analysis.ipynb` trong Jupyter 
 
 ## Chạy DE trên Kaggle
 
-Notebook gọi `bash deployment/kaggle/run.sh --mode MODE`, với `MODE` là `setup`, `smoke` hoặc `evolve`. Các cell mẫu nằm trong mục [Chạy trên Kaggle](src/IT4906/de/HANDOVER.md#chạy-trên-kaggle).
+Notebook gọi `bash deployment/kaggle/run.sh --mode MODE`, với `MODE` là `setup`, `smoke`, `evolve` hoặc `evaluate`. Các cell mẫu nằm trong mục [Chạy trên Kaggle](src/IT4906/de/HANDOVER.md#chạy-trên-kaggle).
 
 ## Prompt
 

@@ -32,4 +32,4 @@ Kế hoạch chạy: `context/docs/de_execution_plan.md` (Kaggle/Colab, checkpoi
 
 ## Chạy trên Kaggle
 
-Dùng `deployment/kaggle/run.sh` với các chế độ `setup`, `smoke` và `evolve`. Các cell mẫu, đường dẫn dataset và cách nạp Secrets có trong mục [Chạy trên Kaggle](HANDOVER.md#chạy-trên-kaggle).
+Dùng `deployment/kaggle/run.sh` với các chế độ `setup`, `smoke`, `evolve` và `evaluate`. `evolve` chọn prompt trên `val`; `evaluate` dùng prompt đã chọn để xuất điểm trên `test`. Xem các cell mẫu và cách nạp Secrets trong mục [Chạy trên Kaggle](HANDOVER.md#chạy-trên-kaggle).

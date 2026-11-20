@@ -10,5 +10,6 @@ pillow
 python-dotenv
 pyyaml
 rouge-score
+sacrebleu
 sentencepiece
 transformers>=5,<6
