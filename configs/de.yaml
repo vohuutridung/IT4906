@@ -55,9 +55,9 @@ evolution_llm:  # Model lớn lai ghép + đột biến prompt
 de:
   population_size: 10    # N — theo file TTTH
   iterations: 10         # T — theo file TTTH, không early stopping
-  initial_mode: "topk"   # CHỐT TẠM: P₀ = top-10 fitness của pool 20 (script mẫu repo dùng para_topk)
+  initial_mode: "human"  # human | gpt | random | top | bottom
   donor_random: false    # Prompt 3 = best prompt (theo file TTTH + code gốc template v1)
-  pool_files:            # ✅ CHỐT: trộn CẢ 2 FILE (khớp code gốc --initial all)
+  pool_files:            # Theo thứ tự: file human, file GPT. random/top/bottom dùng chung cả hai.
     - "data/med_findings_gen/prompts.txt"
     - "data/med_findings_gen/prompts_auto.txt"
   cache_dir: "runs/de"   # checkpoint + cache; Kaggle: /kaggle/working/runs/de

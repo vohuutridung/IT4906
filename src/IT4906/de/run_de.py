@@ -1,7 +1,6 @@
 """Entrypoint: uv run python -m IT4906.de.run_de --config configs/de.yaml [--smoke]
 
---smoke: 5 sample × 3 prompts × 1 thế hệ — kiểm tra pipeline trước khi chạy thật
-(giảm cùng lúc population qua config nếu muốn nhanh hơn nữa).
+--smoke: tối đa 5 sample, quần thể 4 prompt, 1 thế hệ.
 """
 
 from __future__ import annotations
@@ -66,7 +65,7 @@ def main() -> None:
         cfg["data"]["num_samples"] = min(5, int(cfg["data"].get("num_samples", 200)))
         cfg["de"]["iterations"] = 1
         # N phải >= 4: donors cần 3 prompt khác target (code gốc choice 3, replace=False)
-        cfg["de"]["population_size"] = max(4, min(4, int(cfg["de"]["population_size"])))
+        cfg["de"]["population_size"] = 4
 
     set_seed(int(cfg.get("seed", 5)))
     out_dir = cfg["de"].get("cache_dir", "runs/de")

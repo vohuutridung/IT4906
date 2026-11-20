@@ -1,8 +1,7 @@
-"""Vòng lặp DE — khớp semantics code gốc `DEEvoluter.evolute()` (beeevita/EvoPrompt):
+"""Vòng lặp DE cho EvoPrompt.
 
-- Pool ban đầu = prompts.txt + prompts_auto.txt (manual + ape), eval TOÀN BỘ pool trên dev.
-- P₀ chọn từ pool theo `initial_mode` (topk = top-N fitness).
-- best ban đầu = best trên TOÀN BỘ pool đã eval (không chỉ P₀); tie -> phần tử đầu (max()).
+- P₀ mặc định lấy prompt do người viết. Các chế độ khác dùng prompt GPT, chọn ngẫu nhiên
+  hoặc xếp hạng theo fitness. Donor tốt nhất ban đầu được chọn trong P₀.
 - Mỗi thế hệ: lần lượt từng prompt làm target; donors a,b = np.random.choice(candidates,
   3, replace=False) (candidates = population trừ target), c = best nếu donor_random=False.
 - Offspring chỉ thay target nếu fitness(offspring) > fitness(target) (tie giữ old).
@@ -26,8 +25,12 @@ from .fitness import FitnessEvaluator
 from .target_llm import TargetLLM
 
 
+INITIAL_MODES = ("human", "gpt", "random", "top", "bottom")
+INITIAL_MODE_ALIASES = {"randomk": "random", "topk": "top"}
+
+
 def read_prompt_pool(pool_files: list[str]) -> list[str]:
-    """Đọc pool theo thứ tự file (manual trước, auto sau — như code gốc manual_pop + ape_pop)."""
+    """Đọc prompt phân biệt theo thứ tự xuất hiện trong các file."""
     pool: list[str] = []
     for path in pool_files:
         with open(path, encoding="utf-8") as f:
@@ -35,18 +38,7 @@ def read_prompt_pool(pool_files: list[str]) -> list[str]:
                 line = line.strip()
                 if line:
                     pool.append(line)
-    return pool
-
-
-def k_init_pop(initial_mode: str, pool_sorted: list[str], k: int) -> list[str]:
-    """Khớp `utils.k_init_pop` code gốc. Mode para_* cần paraphrase -> bổ sung khi nhóm chốt."""
-    if initial_mode == "topk":
-        return list(pool_sorted[:k])
-    if initial_mode == "randomk":
-        return random.sample(pool_sorted, k)
-    raise ValueError(
-        f"initial_mode '{initial_mode}' chưa implement. Dùng 'topk' hoặc 'randomk'."
-    )
+    return list(dict.fromkeys(pool))
 
 
 def run_fingerprint(cfg: dict) -> str:
@@ -60,7 +52,11 @@ def run_fingerprint(cfg: dict) -> str:
     - Bỏ `de.cache_dir` (thư mục out) và `fitness.device` (bố trí GPU) — không đổi kết quả.
     """
     cfg2 = json.loads(json.dumps(cfg))  # deep copy
-    cfg2.get("de", {}).pop("cache_dir", None)
+    de_cfg = cfg2.get("de", {})
+    de_cfg.pop("cache_dir", None)
+    # Randomk cũ chọn best từ cả pool, nên checkpoint cũ khác ngữ nghĩa với random mới.
+    if de_cfg.get("initial_mode") == "randomk":
+        de_cfg["initial_mode"] = "random"
     cfg2.get("fitness", {}).pop("device", None)
     payload = json.dumps(cfg2, sort_keys=True, ensure_ascii=False)
     return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:10]
@@ -74,7 +70,12 @@ class DERunner:
 
         self.N: int = int(cfg["de"]["population_size"])
         self.T: int = int(cfg["de"]["iterations"])
-        self.initial_mode: str = cfg["de"].get("initial_mode", "topk")
+        initial_mode = cfg["de"].get("initial_mode", "human")
+        self.initial_mode = INITIAL_MODE_ALIASES.get(initial_mode, initial_mode)
+        if self.initial_mode not in INITIAL_MODES:
+            raise ValueError(f"initial_mode '{initial_mode}' không hợp lệ. Chọn {', '.join(INITIAL_MODES)}.")
+        if self.N < 1 or (self.T > 0 and self.N < 4):
+            raise ValueError("population_size phải dương và cần ít nhất 4 prompt khi chạy thế hệ DE.")
         self.donor_random: bool = bool(cfg["de"].get("donor_random", False))
 
         data_cfg = cfg["data"]
@@ -106,6 +107,36 @@ class DERunner:
         cands = self.target.generate_batch(pairs)
         refs = [s.findings_gt for s in samples]
         return self.fitness.score(prompt_text, cands, refs)
+
+    def _initialize_population(self) -> list[str]:
+        files = self.cfg["de"]["pool_files"]
+        if self.initial_mode == "human":
+            files = files[:1]
+        elif self.initial_mode == "gpt":
+            files = files[1:2]
+
+        pool = read_prompt_pool(files)
+        if len(pool) < self.N:
+            raise ValueError(
+                f"initial_mode '{self.initial_mode}' cần {self.N} prompt phân biệt, "
+                f"chỉ tìm thấy {len(pool)} trong {files}."
+            )
+
+        ranked = self.initial_mode in ("top", "bottom")
+        if self.initial_mode == "random":
+            candidates = random.Random(int(self.cfg.get("seed", 5))).sample(pool, self.N)
+        else:
+            candidates = pool if ranked else pool[:self.N]
+
+        print(f"[init] mode={self.initial_mode}, pool={len(pool)}, eval={len(candidates)}")
+        for i, prompt in enumerate(candidates, start=1):
+            scores = self.evaluate_prompt(prompt)
+            self.evaluated[prompt] = scores
+            print(f"[pool {i}/{len(candidates)}] fitness={scores['fitness']:.4f} ({prompt[:60]}...)")
+
+        if ranked:
+            candidates.sort(key=lambda p: self.evaluated[p]["fitness"], reverse=self.initial_mode == "top")
+        return candidates[:self.N]
 
     # ---------- checkpoint ----------
     def _save_checkpoint(self, step_done: int, population: list[str], best_prompt: str, best_score: float) -> None:
@@ -149,30 +180,12 @@ class DERunner:
     def run(self) -> dict:
         t0 = time.time()
         print(f"[init] dev samples: {len(self.samples)}")
-        pool = read_prompt_pool(self.cfg["de"]["pool_files"])
-        print(f"[init] pool = {len(pool)} prompts (trộn {len(self.cfg['de']['pool_files'])} file)")
-
         resumed = self._try_resume()
         if resumed is None:
-            # 1) Eval toàn bộ pool (khớp --initial all của code gốc)
-            for i, p in enumerate(pool):
-                if p not in self.evaluated:
-                    self.evaluated[p] = self.evaluate_prompt(p)
-                    print(
-                        f"[pool {i + 1}/{len(pool)}] fitness={self.evaluated[p]['fitness']:.4f} "
-                        f"({p[:60]}...)"
-                    )
-            pool_sorted = sorted(
-                self.evaluated.items(), key=lambda kv: kv[1]["fitness"], reverse=True
-            )
-            # 2) P0 theo initial_mode
-            population = k_init_pop(self.initial_mode, [p for p, _ in pool_sorted], self.N)
-            # 3) best ban đầu = best trên toàn bộ pool đã eval (tie: phần tử đầu — max() code gốc)
-            best_prompt, best_scores = max(
-                self.evaluated.items(), key=lambda kv: kv[1]["fitness"]
-            )
-            best_score = best_scores["fitness"]
-            print(f"[P0] = top-{len(population)} theo {self.initial_mode}; best={best_score:.4f}")
+            population = self._initialize_population()
+            best_prompt = max(population, key=lambda p: self.evaluated[p]["fitness"])
+            best_score = self.evaluated[best_prompt]["fitness"]
+            print(f"[P0] mode={self.initial_mode}, size={len(population)}, best={best_score:.4f}")
             step_done = 0  # lần đầu chạy: chưa có thế hệ nào hoàn thành
             self._save_checkpoint(0, population, best_prompt, best_score)
         else:

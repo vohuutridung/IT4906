@@ -14,6 +14,7 @@ Options for smoke and evolve:
   --data-root PATH    Use attached Parquet files instead of streaming from Hugging Face.
   --work-root PATH    Write to PATH/runs/de or PATH/runs/de_smoke (default: /kaggle/working).
   --config PATH       DE YAML configuration (default: configs/de.yaml).
+  --init-mode MODE    Population initialization: human (default), gpt, random, top, bottom.
   --set KEY VALUE     Override a YAML setting. May be repeated.
   -h, --help          Show this help.
 
@@ -38,13 +39,14 @@ while [[ $# -gt 0 ]]; do
             usage
             exit 0
             ;;
-        --mode|--data-root|--work-root|--config)
+        --mode|--data-root|--work-root|--config|--init-mode)
             [[ $# -ge 2 && -n "$2" && "$2" != --* ]] || fail "$1 requires a value."
             case "$1" in
                 --mode) mode="$2" ;;
                 --data-root) data_root="$2" ;;
                 --work-root) work_root="$2" ;;
                 --config) config="$2" ;;
+                --init-mode) overrides+=(--set de.initial_mode "$2") ;;
             esac
             shift 2
             ;;

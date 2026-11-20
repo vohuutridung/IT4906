@@ -11,7 +11,7 @@ Kế hoạch chạy: `context/docs/de_execution_plan.md` (Kaggle/Colab, checkpoi
 | `target_llm.py` | Wrapper `medgemma-1.5-4b-it` (batch, max_new_tokens 128, cache generation theo (prompt, sample)) |
 | `fitness.py` | `0.7 × BERTScore(xlm-roberta-large, F1) + 0.3 × ROUGE-L(F1)` — model/variant qua config, có cache |
 | `evolution_llm.py` | Wrapper `medgemma-27b-text-it` (4-bit), instruction 4 bước EvoPrompt, parse `<prompt>...</prompt>` |
-| `de_loop.py` | Vòng lặp DE: pool 2 file → topk P₀ → T thế hệ, greedy pairwise (`>`), checkpoint/resume |
+| `de_loop.py` | Khởi tạo P₀ theo `initial_mode`, chạy T thế hệ với greedy pairwise (`>`), checkpoint/resume |
 | `run_de.py` | Entrypoint: `uv run python -m IT4906.de.run_de --config configs/de.yaml` |
 
 ## Dependencies (chưa thêm vào pyproject — chờ xác nhận vì file dùng chung với nhóm GA)

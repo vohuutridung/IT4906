@@ -35,5 +35,5 @@ Notebook gọi `bash deployment/kaggle/run.sh --mode MODE`, với `MODE` là `se
 
 ## Prompt
 
-- `data/med_findings_gen/prompts.txt`: các phiên bản prompt đang được lưu để so sánh.
-- `data/med_findings_gen/prompts_auto.txt`: file prompt tự động, hiện đang trống.
+- `data/med_findings_gen/prompts.txt`: 10 prompt do người viết, dùng mặc định cho DE.
+- `data/med_findings_gen/prompts_auto.txt`: 10 prompt tự động, dùng cho chế độ `gpt`.

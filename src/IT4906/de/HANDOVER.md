@@ -20,7 +20,7 @@ Tối ưu prompt tạo phần **Findings** trong báo cáo X-quang ngực tiến
 | Code pipeline DE end-to-end | ✅ Xong, đã push nhánh `feat/de-med-findings` |
 | Chạy thật kiểm chứng (đợt ngắn, Kaggle 2×T4, 11–12/11) | ✅ Đã xác nhận các fix (fp16 NaN, OOM, offspring rác, cache poison) |
 | Endpoint thật cho Evolution LLM (base_url / api_key / model name) | ❌ **Chưa có** — đang placeholder trong `.env.example` |
-| **Full run** (pool 20 → top-10 → 10 thế hệ × population 10 × 200 sample) | ❌ **Chưa chạy** — hết quota Kaggle 30h/tuần của người viết |
+| **Full run** (10 thế hệ × population 10 × 200 sample) | ❌ **Chưa chạy** — hết quota Kaggle 30h/tuần của người viết |
 
 ## 3. Cài đặt
 
@@ -127,6 +127,20 @@ Thay `MODEL_ID_CUA_ENDPOINT` bằng tên model mà endpoint cung cấp.
 
 Thêm `--set data.num_samples 50` hoặc `--set de.iterations 3` để thử cấu hình nhỏ hơn. Dùng một `--work-root` riêng cho từng cấu hình thí nghiệm.
 
+### Chọn chiến lược khởi tạo quần thể
+
+Dùng `--init-mode` trong script Kaggle hoặc `--set de.initial_mode` với CLI Python.
+
+| Chế độ | 10 prompt trong quần thể ban đầu theo cấu hình mặc định |
+|---|---|
+| `human` (mặc định) | 10 prompt do người viết trong `prompts.txt` |
+| `gpt` | 10 prompt đã lưu trong `prompts_auto.txt` |
+| `random` | Rút 10 prompt phân biệt từ cả hai file theo `seed` |
+| `top` | 10 prompt có fitness cao nhất sau khi chấm cả hai file trên `val` |
+| `bottom` | 10 prompt có fitness thấp nhất sau khi chấm cả hai file trên `val` |
+
+Với `human`, `gpt` và `random`, runner chọn prompt trước rồi mới chấm. Với cả năm chế độ, donor tốt nhất ban đầu được chọn trong quần thể đã khởi tạo. `smoke` dùng cùng chiến lược với quần thể 4 prompt.
+
 ## 6. Checkpoint & cache — đọc trước khi dọn dẹp
 
 Tất cả nằm trong `runs/de/` (hoặc thư mục `de.cache_dir`):
@@ -155,7 +169,7 @@ Smoke luôn ghi vào `runs/de_smoke/`, không đụng full run.
 | evolution_llm | max_new_tokens | **1500** (official 1000) | ⚠️ lệch official: 27B trích-dẫn donors làm cắt cụt thẻ `<prompt>` (thật 12/11) |
 | evolution_llm | temperature / top_p | 0.5 / 0.95 | official default |
 | de | population_size / iterations | 10 / 10 | theo file TTTH |
-| de | initial_mode | topk | P₀ = top-10 của pool 20 (2 file prompts.txt + prompts_auto.txt) |
+| de | initial_mode | human | Có thể đổi sang `gpt`, `random`, `top` hoặc `bottom` |
 
 ## 8. Sự cố đã gặp thật (đã fix — gặp lại thì tra đây)
 
