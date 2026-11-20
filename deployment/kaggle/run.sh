@@ -14,6 +14,7 @@ Modes:
 
 Options for smoke and evolve:
   --target-gpus N     Replicate Target LLM on 1 or 2 CUDA GPUs (default: 1).
+  --val-num-samples N Use the first N validation samples (config default: 200, smoke cap: 5).
   --data-root PATH    Use attached Parquet files instead of streaming from Hugging Face.
   --work-root PATH    Write to PATH/runs/de or PATH/runs/de_smoke (default: /kaggle/working).
   --config PATH       DE YAML configuration (default: configs/de.yaml).
@@ -53,6 +54,7 @@ work_root="/kaggle/working"
 config="configs/de.yaml"
 run_dir=""
 eval_num_samples=""
+val_num_samples=""
 target_gpus=""
 local_folder=""
 hf_folder=""
@@ -64,7 +66,7 @@ while [[ $# -gt 0 ]]; do
             usage
             exit 0
             ;;
-        --mode|--data-root|--work-root|--config|--run-dir|--eval-num-samples|--target-gpus|--local-folder|--hf-folder|--init-mode|--evolution-provider|--evolution-model-id)
+        --mode|--data-root|--work-root|--config|--run-dir|--eval-num-samples|--val-num-samples|--target-gpus|--local-folder|--hf-folder|--init-mode|--evolution-provider|--evolution-model-id)
             [[ $# -ge 2 && -n "$2" && "$2" != --* ]] || fail "$1 requires a value."
             case "$1" in
                 --mode) mode="$2" ;;
@@ -73,6 +75,7 @@ while [[ $# -gt 0 ]]; do
                 --config) config="$2" ;;
                 --run-dir) run_dir="$2" ;;
                 --eval-num-samples) eval_num_samples="$2" ;;
+                --val-num-samples) val_num_samples="$2" ;;
                 --target-gpus) target_gpus="$2" ;;
                 --local-folder) local_folder="$2" ;;
                 --hf-folder) hf_folder="$2" ;;
@@ -99,6 +102,9 @@ export PYTHONPATH="$repo_root/src${PYTHONPATH:+:$PYTHONPATH}"
 if [[ "$mode" != push-results && ( -n "$local_folder" || -n "$hf_folder" ) ]]; then
     fail "--local-folder and --hf-folder are for push-results."
 fi
+if [[ -n "$val_num_samples" && "$mode" != smoke && "$mode" != evolve ]]; then
+    fail "--val-num-samples is for smoke and evolve."
+fi
 
 target_args=()
 if [[ -n "$target_gpus" ]]; then
@@ -116,6 +122,9 @@ case "$mode" in
         args=(--config "$config" --set de.cache_dir "${work_root%/}/runs/de")
         if [[ -n "$data_root" ]]; then
             args+=(--set data.dataset_dir "$data_root")
+        fi
+        if [[ -n "$val_num_samples" ]]; then
+            args+=(--val-num-samples "$val_num_samples")
         fi
         if [[ "$mode" == smoke ]]; then
             args+=(--smoke)

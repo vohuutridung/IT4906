@@ -67,7 +67,7 @@ uv run python -m IT4906.de.run_de --config configs/de.yaml --smoke
 uv run python -m IT4906.de.run_de --config configs/de.yaml
 
 # Ghi đè config tạm thời (không sửa file), VD chạy ít sample hơn để đo thời gian:
-uv run python -m IT4906.de.run_de --config configs/de.yaml --set data.num_samples 50
+uv run python -m IT4906.de.run_de --config configs/de.yaml --val-num-samples 50
 ```
 
 ### Chạy lâu trên server (dev100) — khuyến nghị dùng tmux
@@ -143,7 +143,7 @@ Log notebook cho biết thế hệ và ứng viên đang xử lý, số mẫu đ
 
 Trên máy có hai GPU CUDA, thêm `--target-gpus 2` để đặt một bản MedGemma trên mỗi GPU. `target_llm.batch_size` là số mẫu mỗi GPU. Với `batch_size: 4`, hai GPU có thể xử lý cùng lúc 8 mẫu của một ứng viên, rồi ghép dự đoán đúng thứ tự trước khi tính fitness. Khi dùng greedy mặc định, có thể thêm cờ vào lệnh resume cùng `--work-root` để dùng lại checkpoint và cache. BERTScore vẫn ưu tiên GPU 1 trong bước chấm fitness, nên GPU này cần đủ bộ nhớ cho cả hai model.
 
-Thêm `--set data.num_samples 50` hoặc `--set de.iterations 3` để thử cấu hình nhỏ hơn. Dùng một `--work-root` riêng cho từng cấu hình thí nghiệm.
+Thêm `--val-num-samples 50` để chấm trên 50 mẫu đầu của `val`, hoặc `--set de.iterations 3` để giảm số thế hệ. Mặc định là 200 mẫu và `smoke` vẫn giới hạn tối đa 5 mẫu. Khi đổi số mẫu, fitness được tính lại theo tập mới. Dùng một `--work-root` riêng nếu muốn giữ hai run để so sánh.
 
 **Cell 5. Đánh giá prompt tốt nhất trên test**
 

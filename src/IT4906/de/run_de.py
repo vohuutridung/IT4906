@@ -44,6 +44,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="EvoPrompt DE — Medical Findings Generation")
     parser.add_argument("--config", default="configs/de.yaml")
     parser.add_argument("--smoke", action="store_true", help="5 sample × 1 thế hệ")
+    parser.add_argument("--val-num-samples", type=int, metavar="N", help="dùng N mẫu đầu của tập validation")
     parser.add_argument("--target-gpus", type=int, choices=(1, 2), help="số GPU chạy Target LLM")
     parser.add_argument(
         "--evolution-provider", choices=tuple(DEFAULT_EVOLUTION_MODELS),
@@ -57,6 +58,8 @@ def main() -> None:
         help="ghi đè config, VD: --set data.num_samples 50",
     )
     args = parser.parse_args()
+    if args.val_num_samples is not None and args.val_num_samples < 1:
+        parser.error("--val-num-samples phải là số nguyên dương.")
     if args.evolution_model_id is not None and not args.evolution_model_id.strip():
         parser.error("--evolution-model-id cần một ID model.")
 
@@ -78,6 +81,8 @@ def main() -> None:
         cfg["evolution_llm"]["model_id"] = args.evolution_model_id
     if args.target_gpus is not None:
         cfg["target_llm"]["num_gpus"] = args.target_gpus
+    if args.val_num_samples is not None:
+        cfg["data"]["num_samples"] = args.val_num_samples
 
     if args.smoke:
         cfg["data"]["num_samples"] = min(5, int(cfg["data"].get("num_samples", 200)))
