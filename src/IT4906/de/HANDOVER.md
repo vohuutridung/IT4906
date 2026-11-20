@@ -139,6 +139,8 @@ Chạy thử qua OpenRouter với model mặc định:
 
 `smoke` ghi vào `/kaggle/working/it4906/runs/de_smoke/`, còn `evolve` ghi vào `/kaggle/working/it4906/runs/de/`. Kết quả cuối là `best_prompt.json`. Để tiếp tục ở session mới, chép thư mục kết quả cũ vào đúng thư mục output và gọi lại `evolve` với cấu hình cũ. Runner tự tìm `checkpoint.json`.
 
+Log notebook cho biết thế hệ và ứng viên đang xử lý, số mẫu đã sinh Findings, bước tính từng metric và lúc lưu checkpoint. Các bước chờ lâu in thêm dòng `chưa hoàn tất` khoảng mỗi 15 giây. Khi resume, log cho biết phản hồi và điểm nào được dùng lại.
+
 Thêm `--set data.num_samples 50` hoặc `--set de.iterations 3` để thử cấu hình nhỏ hơn. Dùng một `--work-root` riêng cho từng cấu hình thí nghiệm.
 
 **Cell 5. Đánh giá prompt tốt nhất trên test**
@@ -150,6 +152,8 @@ Thêm `--set data.num_samples 50` hoặc `--set de.iterations 3` để thử c�
 ```
 
 Cell đọc `best_prompt.json` và cấu hình đã lưu của run rồi dùng Target LLM sinh Findings trên toàn bộ `test`. Bước này dùng quyền tải Target LLM qua `HF_TOKEN`. Kết quả nằm trong `runs/de/test_eval/` dưới `--work-root`, gồm `metrics.json` với BERTScore F1, ROUGE-L F1, fitness và corpus BLEU (SacreBLEU, thang 0–100), cùng `predictions.jsonl` chứa dự đoán và tham chiếu theo từng mẫu. Fitness dùng để chọn prompt trên `val` được ghi riêng trong `selection_fitness`.
+
+Log đánh giá hiện số mẫu test có Findings sau mỗi batch, lúc nạp BERTScore, lúc tính BERTScore, ROUGE-L và BLEU, cùng đường dẫn `metrics.json`.
 
 `--run-dir PATH` chọn thư mục run khác. `--eval-num-samples 5` đánh giá thử 5 mẫu đầu và lưu riêng trong `test_eval_first_5/`. Với kết quả cũ chưa có cấu hình lưu kèm, dùng `--config PATH` trỏ đến YAML đã dùng cho run đó. Nếu đã chạy `setup` trước khi có bước này, chạy lại `setup` để cài SacreBLEU.
 

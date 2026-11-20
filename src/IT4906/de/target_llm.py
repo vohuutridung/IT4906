@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from contextlib import nullcontext
 from pathlib import Path
 
 import torch
@@ -20,6 +21,7 @@ from transformers import AutoModelForImageTextToText, AutoProcessor
 
 from .cuda_compat import apply_turing_sdpa_patch
 from .data import SYSTEM_PROMPT, Sample
+from .progress import progress_stage
 
 GenCacheKey = tuple[str, str, int]  # (gen_config_fingerprint, rendered_prompt, sample.idx)
 
@@ -67,17 +69,19 @@ class TargetLLM:
 
     def _load(self) -> None:
         apply_turing_sdpa_patch()
-        self.processor = AutoProcessor.from_pretrained(self.model_id)
+        with progress_stage(f"[target] tải processor {self.model_id}"):
+            self.processor = AutoProcessor.from_pretrained(self.model_id)
         # Batched generate cho decoder-only cần LEFT padding, không phải right mặc định
         self.processor.tokenizer.padding_side = "left"
         # Ghim NGUYÊN model lên GPU 0 — KHÔNG dùng "auto": auto chia đều 2 GPU,
         # khiến GPU 0 hết chỗ cho KV cache + activation khi evolution 27B nạp sau
         # và chiếm nốt phần dư (đã OOM thật 2026-11-11).
         device_map = {"": 0} if torch.cuda.is_available() else "auto"
-        self.model = AutoModelForImageTextToText.from_pretrained(
-            self.model_id, dtype=self.dtype, device_map=device_map
-        )
-        self.model.eval()
+        with progress_stage(f"[target] nạp trọng số {self.model_id}"):
+            self.model = AutoModelForImageTextToText.from_pretrained(
+                self.model_id, dtype=self.dtype, device_map=device_map
+            )
+            self.model.eval()
 
     def generate(self, prompt_text: str, sample: Sample) -> str:
         """Sinh Findings cho 1 sample. Có cache."""
@@ -87,18 +91,26 @@ class TargetLLM:
         out = self._generate_batch([(prompt_text, sample)])[0]
         return out
 
-    def generate_batch(self, pairs: list[tuple[str, Sample]]) -> list[str]:
+    def generate_batch(self, pairs: list[tuple[str, Sample]], *, progress: str | None = None) -> list[str]:
         """Sinh Findings cho nhiều (prompt, sample); bỏ qua cặp đã cache."""
         todo = [(p, s) for p, s in pairs if _key(self._gen_fp, p, s.idx) not in self.cache]
-        results: dict[str, str] = {}
-        for i in range(0, len(todo), self.batch_size):
-            chunk = todo[i : i + self.batch_size]
-            outs = self._generate_batch(chunk)
-            for (p, s), o in zip(chunk, outs):
-                results[_key(self._gen_fp, p, s.idx)] = o
-            self._append_cache(
-                [(_key(self._gen_fp, p, s.idx), o) for (p, s), o in zip(chunk, outs)]
-            )
+        cached = len(pairs) - len(todo)
+        if progress and not todo:
+            print(f"{progress} Findings dùng cache {cached}/{len(pairs)} mẫu", flush=True)
+        stage = (
+            progress_stage(f"{progress} sinh Findings cho {len(todo)} mẫu, cache {cached}/{len(pairs)}")
+            if progress and todo else nullcontext()
+        )
+        with stage:
+            for batch_no, i in enumerate(range(0, len(todo), self.batch_size), start=1):
+                chunk = todo[i : i + self.batch_size]
+                outs = self._generate_batch(chunk)
+                self._append_cache(
+                    [(_key(self._gen_fp, p, s.idx), o) for (p, s), o in zip(chunk, outs)]
+                )
+                generated = i + len(chunk)
+                if progress and (batch_no == 1 or batch_no % 10 == 0 or generated == len(todo)):
+                    print(f"{progress} Findings {cached + generated}/{len(pairs)} mẫu", flush=True)
         # gộp kết quả theo thứ tự yêu cầu
         return [self.cache[_key(self._gen_fp, p, s.idx)] for p, s in pairs]
 

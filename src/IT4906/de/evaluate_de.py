@@ -14,6 +14,7 @@ from sacrebleu.metrics import BLEU
 from .artifacts import write_json, write_text_atomic
 from .data import DEFAULT_DATASET_ID, iter_split, render_prompt
 from .fitness import FitnessEvaluator
+from .progress import progress_stage
 from .run_de import load_env, set_seed
 from .target_llm import TargetLLM
 
@@ -47,30 +48,33 @@ def evaluate(run_dir: Path, config_path: Path, data_root: str | None, limit: int
     # Tách cache test khỏi các mẫu validation và khỏi các cấu hình target khác.
     cache_key = json.dumps([dataset_id, dataset_dir, config["target_llm"]], sort_keys=True)
     cache_path = eval_dir / "cache" / hashlib.sha256(cache_key.encode("utf-8")).hexdigest()[:16]
+    print(f"[test] source={dataset_dir or dataset_id} split=test target={config['target_llm']['model_id']}", flush=True)
     target = TargetLLM(config["target_llm"], str(cache_path))
     metric = FitnessEvaluator(config["fitness"], str(cache_path))
     samples = iter_split(dataset_dir, "test", limit, dataset_id=dataset_id)
     rows = []
-    print(f"[test] source={dataset_dir or dataset_id} split=test target={target.model_id}")
-    while batch := list(islice(samples, target.batch_size)):
-        pairs = [(render_prompt(prompt, sample), sample) for sample in batch]
-        predictions = target.generate_batch(pairs)
-        rows.extend(
-            {"sample_idx": sample.idx, "prediction": prediction, "reference": sample.findings_gt}
-            for sample, prediction in zip(batch, predictions, strict=True)
-        )
-        print(f"[test] {len(rows)} mẫu")
+    with progress_stage("[test] đọc mẫu và sinh Findings"):
+        while batch := list(islice(samples, target.batch_size)):
+            pairs = [(render_prompt(prompt, sample), sample) for sample in batch]
+            predictions = target.generate_batch(pairs)
+            rows.extend(
+                {"sample_idx": sample.idx, "prediction": prediction, "reference": sample.findings_gt}
+                for sample, prediction in zip(batch, predictions, strict=True)
+            )
+            print(f"[test] đã có Findings cho {len(rows)} mẫu", flush=True)
     if not rows:
         raise ValueError("Không tìm thấy mẫu trong split test.")
 
-    write_text_atomic(eval_dir / "predictions.jsonl", "".join(
-        json.dumps(row, ensure_ascii=False) + "\n" for row in rows
-    ))
+    with progress_stage(f"[test] lưu {len(rows)} dự đoán vào predictions.jsonl"):
+        write_text_atomic(eval_dir / "predictions.jsonl", "".join(
+            json.dumps(row, ensure_ascii=False) + "\n" for row in rows
+        ))
     cands = [row["prediction"] for row in rows]
     refs = [row["reference"] for row in rows]
-    scores = metric.score(prompt, cands, refs)
+    scores = metric.score(prompt, cands, refs, progress="[test fitness]")
     bleu = BLEU()
-    bleu_score = bleu.corpus_score(cands, [refs]).score
+    with progress_stage(f"[test] tính corpus BLEU trên {len(rows)} mẫu"):
+        bleu_score = bleu.corpus_score(cands, [refs]).score
     report = {
         "run_id": best.get("run_id"),
         "dataset_id": dataset_id,

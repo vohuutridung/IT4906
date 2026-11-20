@@ -24,6 +24,7 @@ from .artifacts import write_json
 from .data import DEFAULT_DATASET_ID, Sample, load_split, render_prompt
 from .evolution_llm import INSTRUCTION_TEMPLATE, EvolutionLLM, parse_final_prompt
 from .fitness import FitnessEvaluator
+from .progress import progress_stage
 from .target_llm import TargetLLM
 
 
@@ -88,14 +89,14 @@ class DERunner:
         data_key = json.dumps({"source": source, "split": split}, sort_keys=True)
         data_fingerprint = hashlib.sha1(data_key.encode("utf-8")).hexdigest()[:10]
         cache_dir = str(self.out_dir / "cache" / data_fingerprint)
-        print(f"[data] source={dataset_dir or dataset_id} split={split}")
-        self.samples: list[Sample] = load_split(
-            dataset_dir, split, int(data_cfg.get("num_samples", 200)), dataset_id=dataset_id
-        )
+        num_samples = int(data_cfg.get("num_samples", 200))
+        with progress_stage(f"[data] đọc tối đa {num_samples} mẫu, source={dataset_dir or dataset_id} split={split}"):
+            self.samples: list[Sample] = load_split(dataset_dir, split, num_samples, dataset_id=dataset_id)
         self.target = TargetLLM(cfg["target_llm"], cache_dir)
         self.fitness = FitnessEvaluator(cfg["fitness"], cache_dir)
         evolution_cfg = cfg["evolution_llm"]
-        self.evolution = EvolutionLLM(evolution_cfg)
+        with progress_stage(f"[evolution] khởi tạo provider={evolution_cfg.get('provider', 'openai')}"):
+            self.evolution = EvolutionLLM(evolution_cfg)
 
         self.evaluated: dict[str, dict] = {}  # prompt -> {"fitness", "bertscore_f1", "rougeL_f1"}
         self.history: list[dict] = []
@@ -112,13 +113,15 @@ class DERunner:
         return self.out_dir / "evolution" / self.run_id
 
     # ---------- evaluation ----------
-    def evaluate_prompt(self, prompt_text: str, samples: list[Sample] | None = None) -> dict:
+    def evaluate_prompt(
+        self, prompt_text: str, samples: list[Sample] | None = None, *, progress: str = "[fitness]"
+    ) -> dict:
         """Sinh Findings cho prompt trên toàn bộ dev samples rồi tính fitness (có cache 2 lớp)."""
         samples = samples if samples is not None else self.samples
         pairs = [(render_prompt(prompt_text, s), s) for s in samples]
-        cands = self.target.generate_batch(pairs)
+        cands = self.target.generate_batch(pairs, progress=progress)
         refs = [s.findings_gt for s in samples]
-        return self.fitness.score(prompt_text, cands, refs)
+        return self.fitness.score(prompt_text, cands, refs, progress=progress)
 
     def _initialize_population(self) -> list[str]:
         files = self.cfg["de"]["pool_files"]
@@ -142,9 +145,10 @@ class DERunner:
 
         print(f"[init] mode={self.initial_mode}, pool={len(pool)}, eval={len(candidates)}")
         for i, prompt in enumerate(candidates, start=1):
-            scores = self.evaluate_prompt(prompt)
+            progress = f"[pool {i}/{len(candidates)}]"
+            scores = self.evaluate_prompt(prompt, progress=progress)
             self.evaluated[prompt] = scores
-            print(f"[pool {i}/{len(candidates)}] fitness={scores['fitness']:.4f} ({prompt[:60]}...)")
+            print(f"{progress} fitness={scores['fitness']:.4f} ({prompt[:60]}...)", flush=True)
 
         if ranked:
             candidates.sort(key=lambda p: self.evaluated[p]["fitness"], reverse=self.initial_mode == "top")
@@ -205,16 +209,17 @@ class DERunner:
         if not archived_config.exists():
             write_json(archived_config, {**snapshot, "evolution_instruction": INSTRUCTION_TEMPLATE})
 
-    def _proposal(self, path: Path, target: str, donors: list[str]) -> dict:
+    def _proposal(self, path: Path, target: str, donors: list[str], progress: str) -> dict:
         if path.exists():
             record = json.loads(path.read_text(encoding="utf-8"))
             if record["target"] != target or record["donors"] != donors:
                 raise RuntimeError(f"Donor hoặc target không khớp với phản hồi đã lưu trong {path}.")
-            print(f"[resume] dùng lại phản hồi {path.parent.name}/{path.name}")
+            print(f"{progress} dùng lại phản hồi đã lưu", flush=True)
             return record
-        response = self.evolution.generate_response(target, *donors)
-        record = {"target": target, "donors": donors, "raw_response": response}
-        write_json(path, record)
+        with progress_stage(f"{progress} sinh prompt con bằng Evolution LLM"):
+            response = self.evolution.generate_response(target, *donors)
+            record = {"target": target, "donors": donors, "raw_response": response}
+            write_json(path, record)
         return record
 
     # ---------- main loop ----------
@@ -239,9 +244,12 @@ class DERunner:
                 return self._finish(step_done, population, best_prompt, best_score, t0)
 
         for step in range(step_done + 1, self.T + 1):
+            generation_start = time.monotonic()
+            print(f"[gen {step}/{self.T}] bắt đầu, {self.N} ứng viên", flush=True)
             gen_log: dict = {"step": step, "offspring": []}
             new_pop: list[str] = []
             for j in range(self.N):
+                progress = f"[gen {step}/{self.T} pop {j + 1}/{self.N}]"
                 old = population[j]
                 old_scores = self.evaluated[old]
                 # donors: khớp code gốc — choice 3 không thay thế từ population trừ target,
@@ -251,20 +259,24 @@ class DERunner:
                 if not self.donor_random:
                     c = best_prompt
                 path = self.audit_dir / f"gen_{step:03d}" / f"slot_{j + 1:03d}.json"
-                record = self._proposal(path, old, [str(a), str(b), str(c)])
+                record = self._proposal(path, old, [str(a), str(b), str(c)], progress)
                 if "offspring_scores" not in record:
                     offspring = parse_final_prompt(record["raw_response"])
                     off_scores = None
                     if offspring.strip():
                         off_scores = self.evaluated.get(offspring)
                         if off_scores is None:
-                            off_scores = self.evaluate_prompt(offspring)
+                            off_scores = self.evaluate_prompt(offspring, progress=progress)
+                        else:
+                            print(f"{progress} dùng lại fitness của prompt trùng", flush=True)
                     kept = off_scores is not None and off_scores["fitness"] > old_scores["fitness"]
                     record.update(
                         offspring=offspring, old_scores=old_scores, offspring_scores=off_scores,
                         kept=kept, selected=offspring if kept else old,
                     )
                     write_json(path, record)
+                else:
+                    print(f"{progress} dùng lại quyết định và điểm đã lưu", flush=True)
 
                 offspring, off_scores = record["offspring"], record["offspring_scores"]
                 if off_scores is not None:
@@ -289,7 +301,7 @@ class DERunner:
                 )
                 off_display = f"{off_scores['fitness']:.4f}" if off_scores is not None else "rỗng"
                 decision = "giữ offspring" if record["kept"] else "giữ target"
-                print(f"[gen {step} pop {j + 1}/{self.N}] old={old_scores['fitness']:.4f} "
+                print(f"{progress} old={old_scores['fitness']:.4f} "
                       f"off={off_display} -> {decision} (best {best_score:.4f})")
             population = new_pop
             avg = sum(self.evaluated[p]["fitness"] for p in population) / len(population)
@@ -302,10 +314,12 @@ class DERunner:
                 "best_score": best_score,
                 "avg_score": avg,
             }
-            write_json(self.out_dir / f"step{step}_pop.json", summary)
-            write_json(self.audit_dir / f"gen_{step:03d}" / "population.json", summary)
-            self._save_checkpoint(step, population, best_prompt, best_score)
-            print(f"[gen {step} done] best={best_score:.4f} avg={avg:.4f} ({time.time() - t0:.0f}s)")
+            with progress_stage(f"[gen {step}/{self.T}] lưu quần thể và checkpoint"):
+                write_json(self.out_dir / f"step{step}_pop.json", summary)
+                write_json(self.audit_dir / f"gen_{step:03d}" / "population.json", summary)
+                self._save_checkpoint(step, population, best_prompt, best_score)
+            print(f"[gen {step}/{self.T} done] best={best_score:.4f} avg={avg:.4f} "
+                  f"({time.monotonic() - generation_start:.0f}s)", flush=True)
         return self._finish(self.T, population, best_prompt, best_score, t0)
 
     def _finish(self, step_done: int, population: list[str], best_prompt: str, best_score: float, t0: float) -> dict:

@@ -16,6 +16,7 @@ from pathlib import Path
 from rouge_score import rouge_scorer
 
 from .artifacts import write_json
+from .progress import progress_stage
 
 
 def _metric_fingerprint(cfg: dict) -> str:
@@ -55,7 +56,7 @@ class FitnessEvaluator:
         if self.cache_path.exists():
             self.cache = json.loads(self.cache_path.read_text(encoding="utf-8"))
 
-    def _ensure_bertscore(self):
+    def _ensure_bertscore(self, progress: str):
         if self._bertscore is None:
             import torch
             from bert_score import BERTScorer
@@ -65,18 +66,17 @@ class FitnessEvaluator:
                 kwargs["lang"] = self.bertscore_lang
             device = self.device_cfg or self._auto_device()
             try:
-                self._bertscore = BERTScorer(**kwargs, device=device)
-                if device != "cpu" and self.bertscore_bf16:
-                    # bf16: nhả ~1GiB VRAM trên GPU chung với 27B (OOM thật 2026-11-11:
-                    # 27B prefill thiếu 66MiB vì GPU 1 đặc). F1 lệch <0.5% và lệch
-                    # ĐỒNG NHẤT với mọi prompt → công bằng cho so sánh DE.
-                    self._bertscore._model.to(torch.bfloat16)
+                with progress_stage(f"{progress} nạp BERTScore {self.bertscore_model} trên {device}"):
+                    self._bertscore = BERTScorer(**kwargs, device=device)
+                    if device != "cpu" and self.bertscore_bf16:
+                        self._bertscore._model.to(torch.bfloat16)
             except torch.OutOfMemoryError:
                 print(
                     f"[fitness] OOM trên {device} → BERTScore chuyển sang CPU "
                     "(chậm hơn nhưng vẫn chạy)"
                 )
-                self._bertscore = BERTScorer(**kwargs, device="cpu")
+                with progress_stage(f"{progress} nạp BERTScore {self.bertscore_model} trên CPU"):
+                    self._bertscore = BERTScorer(**kwargs, device="cpu")
         return self._bertscore
 
     @staticmethod
@@ -89,7 +89,7 @@ class FitnessEvaluator:
             return "cuda:1"
         return "cuda" if n == 1 else "cpu"
 
-    def score(self, prompt_text: str, cands: list[str], refs: list[str]) -> dict:
+    def score(self, prompt_text: str, cands: list[str], refs: list[str], *, progress: str = "[fitness]") -> dict:
         """Trả {"bertscore_f1", "rougeL_f1", "fitness"} đã cache theo prompt."""
         # Key PHẢI gồm len(refs) (= số dev sample): khoá cũ chỉ sha1(prompt) khiến fitness
         # chấm trên thang 100 sample được tái dùng âm thầm cho run dev 200 (poison vector
@@ -97,6 +97,7 @@ class FitnessEvaluator:
         # không bao giờ trộn 2 thang đo vào cùng bảng xếp hạng.
         k = hashlib.sha1(f"{len(refs)}||{prompt_text}".encode("utf-8")).hexdigest()
         if k in self.cache:
+            print(f"{progress} dùng fitness đã lưu cho {len(refs)} mẫu", flush=True)
             return self.cache[k]
         # Output rỗng (model không sinh chữ nào) phải bị chấm THẤP chứ không làm crash:
         # bert_score với chuỗi rỗng gọi tokenizer.build_inputs_with_special_tokens —
@@ -104,18 +105,20 @@ class FitnessEvaluator:
         n_empty = sum(1 for c in cands if not (c and c.strip()))
         if n_empty:
             print(
-                f"[fitness] cảnh báo: {n_empty}/{len(cands)} output rỗng → chấm thấp "
+                f"{progress} cảnh báo: {n_empty}/{len(cands)} output rỗng → chấm thấp "
                 f"(prompt: {prompt_text[:60]}...)"
             )
         cands = [c if (c and c.strip()) else "(trống)" for c in cands]
         refs = [r if (r and r.strip()) else "(trống)" for r in refs]
-        bert = self._ensure_bertscore()
-        _, _, bf1 = bert.score(cands, refs)
-        bertscore_f1 = float(bf1.mean().item())
-        rouge_f1 = sum(
-            self._rouge.score(ref, cand)[self.rouge_type].fmeasure
-            for cand, ref in zip(cands, refs)
-        ) / max(len(cands), 1)
+        bert = self._ensure_bertscore(progress)
+        with progress_stage(f"{progress} tính BERTScore F1 trên {len(cands)} mẫu"):
+            _, _, bf1 = bert.score(cands, refs)
+            bertscore_f1 = float(bf1.mean().item())
+        with progress_stage(f"{progress} tính {self.rouge_type} F1 trên {len(cands)} mẫu"):
+            rouge_f1 = sum(
+                self._rouge.score(ref, cand)[self.rouge_type].fmeasure
+                for cand, ref in zip(cands, refs)
+            ) / max(len(cands), 1)
         fitness = self.w_bertscore * bertscore_f1 + self.w_rouge * rouge_f1
         rec = {
             "bertscore_f1": bertscore_f1,
@@ -124,6 +127,8 @@ class FitnessEvaluator:
         }
         self.cache[k] = rec
         self._save()
+        print(f"{progress} BERTScore={bertscore_f1:.4f} {self.rouge_type}={rouge_f1:.4f} "
+              f"fitness={fitness:.4f}", flush=True)
         return rec
 
     def _save(self) -> None:
