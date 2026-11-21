@@ -8,7 +8,7 @@ Kế hoạch chạy: `context/docs/de_execution_plan.md` (Kaggle/Colab, checkpoi
 | File | Vai trò |
 |---|---|
 | `data.py` | Load split `val` (parquet), lấy N sample đầu, render prompt (substitute placeholder metadata) |
-| `target_llm.py` | Wrapper `medgemma-1.5-4b-it` (batch, max_new_tokens 128, cache generation theo (prompt, sample)) |
+| `target_llm.py` | Sinh Findings từ ảnh và prompt bằng `Qwen3.5-9B` qua API hoặc bằng MedGemma local, có cache |
 | `fitness.py` | `0.7 × BERTScore(xlm-roberta-large, F1) + 0.3 × ROUGE-L(F1)` — model/variant qua config, có cache |
 | `evolution_llm.py` | Wrapper `medgemma-27b-text-it` (4-bit), instruction 4 bước EvoPrompt, parse `<prompt>...</prompt>` |
 | `de_loop.py` | Khởi tạo P₀ theo `initial_mode`, chạy T thế hệ với greedy pairwise (`>`), checkpoint/resume |
@@ -31,5 +31,7 @@ Kế hoạch chạy: `context/docs/de_execution_plan.md` (Kaggle/Colab, checkpoi
 - `local`: load `medgemma-27b-text-it` bằng transformers 4-bit trên Kaggle 2×T4 (path cũ).
 
 ## Chạy trên Kaggle
+
+Dùng `--target-provider local` để chạy MedGemma trên GPU. `--target-model-id ID` ghi đè model của Target LLM khi chạy `smoke` hoặc `evolve`. Chế độ `evaluate` dùng provider và model đã lưu từ `evolve`.
 
 Dùng `deployment/kaggle/run.sh` với các chế độ `setup`, `smoke`, `evolve` và `evaluate`. `evolve` chọn prompt trên `val`; `evaluate` dùng prompt đã chọn để xuất điểm trên `test`. Xem các cell mẫu và cách nạp Secrets trong mục [Chạy trên Kaggle](HANDOVER.md#chạy-trên-kaggle).

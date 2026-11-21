@@ -10,7 +10,13 @@ data:
   num_samples: 200  # 200 sample ĐẦU của val (thứ tự parquet gốc — cần xác nhận nhóm)
 
 target_llm:  # Model nhỏ sinh Findings để đánh giá prompt
-  model_id: "google/medgemma-1.5-4b-it"
+  provider: "openai"
+  model_id: null          # openai: Qwen3.5-9B, local: google/medgemma-1.5-4b-it
+  # API dùng cùng biến URL và key với evolution_llm. Có thể đặt base_url_env và api_key_env riêng.
+  api_concurrency: 2
+  extra_body:
+    chat_template_kwargs:
+      enable_thinking: false
   num_gpus: 1            # Dùng --target-gpus 2 để đặt một bản MedGemma trên mỗi GPU.
   batch_size: 4           # T4 + bf16: KV cache lớn theo batch — 4 an toàn VRAM (GPU ≥24GB có thể trả lại 16)
   max_new_tokens: 128     # official default

@@ -25,7 +25,7 @@ from .data import DEFAULT_DATASET_ID, PROMPT_RENDER_VERSION, Sample, load_split,
 from .evolution_llm import INSTRUCTION_TEMPLATE, EvolutionLLM, parse_final_prompt
 from .fitness import FitnessEvaluator, check_metric_dependencies
 from .progress import progress_stage
-from .target_llm import TargetLLM, target_result_config
+from .target_llm import TargetLLM, resolve_target_config, target_result_config
 
 
 INITIAL_MODES = ("human", "gpt", "random", "top", "bottom")
@@ -90,12 +90,16 @@ class DERunner:
         dataset_dir = data_cfg.get("dataset_dir")
         dataset_id = data_cfg.get("dataset_id", DEFAULT_DATASET_ID)
         split = data_cfg.get("split", "val")
-        target_cfg = cfg["target_llm"]
+        evolution_cfg = cfg["evolution_llm"]
+        target_cfg = resolve_target_config(cfg["target_llm"], evolution_cfg)
         source = {"parquet": str(Path(dataset_dir).resolve())} if dataset_dir else {"hub": dataset_id}
         cache_identity = {"source": source, "split": split}
-        sampling_gpus = target_result_config(target_cfg).get("num_gpus")
+        target_identity = target_result_config(target_cfg)
+        sampling_gpus = target_identity.get("num_gpus")
         if sampling_gpus is not None:
             cache_identity["sampling_gpus"] = sampling_gpus
+        if target_cfg["provider"] == "openai":
+            cache_identity["target"] = target_identity
         data_key = json.dumps(cache_identity, sort_keys=True)
         data_fingerprint = hashlib.sha1(data_key.encode("utf-8")).hexdigest()[:10]
         cache_dir = str(self.out_dir / "cache" / data_fingerprint)
@@ -104,7 +108,6 @@ class DERunner:
             self.samples: list[Sample] = load_split(dataset_dir, split, num_samples, dataset_id=dataset_id)
         self.target = TargetLLM(target_cfg, cache_dir)
         self.fitness = FitnessEvaluator(cfg["fitness"], cache_dir)
-        evolution_cfg = cfg["evolution_llm"]
         with progress_stage(f"[evolution] khởi tạo provider={evolution_cfg.get('provider', 'openai')}"):
             self.evolution = EvolutionLLM(evolution_cfg)
 
@@ -113,6 +116,7 @@ class DERunner:
         self.checkpoint_path = self.out_dir / "checkpoint.json"
         self.effective_config = {
             **cfg,
+            "target_llm": target_cfg,
             "evolution_llm": {**evolution_cfg, "model_id": self.evolution.model_id},
         }
         self._run_fp = run_fingerprint(self.effective_config)

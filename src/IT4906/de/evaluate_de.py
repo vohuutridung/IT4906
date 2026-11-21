@@ -16,7 +16,7 @@ from .data import DEFAULT_DATASET_ID, iter_split, render_prompt
 from .fitness import FitnessEvaluator, check_metric_dependencies
 from .progress import progress_stage
 from .run_de import load_env, set_seed
-from .target_llm import TargetLLM, target_result_config
+from .target_llm import TargetLLM, resolve_target_config, target_result_config
 
 
 def evaluate(
@@ -50,13 +50,14 @@ def evaluate(
     eval_dir = run_dir / ("test_eval" if limit is None else f"test_eval_first_{limit}")
     set_seed(int(config.get("seed", 5)))
 
-    target_cfg = config["target_llm"].copy()
+    target_cfg = resolve_target_config(config["target_llm"], config.get("evolution_llm"))
     if target_gpus is not None:
         target_cfg["num_gpus"] = target_gpus
     # Tách cache test khỏi các mẫu validation và khỏi các cấu hình target khác.
     cache_key = json.dumps([dataset_id, dataset_dir, target_result_config(target_cfg)], sort_keys=True)
     cache_path = eval_dir / "cache" / hashlib.sha256(cache_key.encode("utf-8")).hexdigest()[:16]
-    print(f"[test] source={dataset_dir or dataset_id} split=test target={target_cfg['model_id']}", flush=True)
+    print(f"[test] source={dataset_dir or dataset_id} split=test "
+          f"target={target_cfg['provider']}/{target_cfg['model_id']}", flush=True)
     target = TargetLLM(target_cfg, str(cache_path))
     metric = FitnessEvaluator(config["fitness"], str(cache_path))
     samples = iter_split(dataset_dir, "test", limit, dataset_id=dataset_id)
@@ -112,7 +113,7 @@ def main() -> None:
     parser.add_argument("--config", type=Path, default=Path("configs/de.yaml"))
     parser.add_argument("--data-root")
     parser.add_argument("--num-samples", type=int)
-    parser.add_argument("--target-gpus", type=int, choices=(1, 2), help="số GPU chạy Target LLM")
+    parser.add_argument("--target-gpus", type=int, choices=(1, 2), help="số GPU chạy Target LLM local")
     args = parser.parse_args()
     load_env()
     evaluate(args.run_dir, args.config, args.data_root, args.num_samples, target_gpus=args.target_gpus)

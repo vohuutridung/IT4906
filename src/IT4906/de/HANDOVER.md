@@ -9,7 +9,7 @@
 Tối ưu prompt tạo phần **Findings** trong báo cáo X-quang ngực tiếng Việt bằng
 **Differential Evolution + LLM** (thuật toán EvoPrompt):
 
-- **Target LLM** — `google/medgemma-1.5-4b-it`: sinh Findings theo prompt đang xét.
+- **Target LLM** — mặc định `Qwen3.5-9B` qua API OpenAI-compatible. Dùng `--target-provider local` để chạy `google/medgemma-1.5-4b-it` trên máy.
 - **Fitness** — `0.7 × BERTScore(xlm-roberta-large) + 0.3 × ROUGE-L(F1)` so với findings thật, trên 200 sample đầu của split `val` (VNMedical_bv175).
 - **Evolution LLM** — model lớn lai ghép + đột biến prompt theo instruction 4 bước EvoPrompt. Xem các provider ở §4.
 
@@ -19,7 +19,6 @@ Tối ưu prompt tạo phần **Findings** trong báo cáo X-quang ngực tiến
 |---|---|
 | Code pipeline DE end-to-end | ✅ Xong, đã push nhánh `feat/de-med-findings` |
 | Chạy thật kiểm chứng (đợt ngắn, Kaggle 2×T4, 11–12/11) | ✅ Đã xác nhận các fix (fp16 NaN, OOM, offspring rác, cache poison) |
-| Endpoint thật cho Evolution LLM (base_url / api_key / model name) | ❌ **Chưa có** — đang placeholder trong `.env.example` |
 | **Full run** (10 thế hệ × population 10 × 200 sample) | ❌ **Chưa chạy** — hết quota Kaggle 30h/tuần của người viết |
 
 ## 3. Cài đặt
@@ -33,7 +32,7 @@ uv sync                     # deps trong pyproject + tự cài package (editable
 # Cài riêng trên MÁY CHẠY (local/dev100/Kaggle):
 uv pip install torch transformers accelerate bitsandbytes datasets pillow bert_score rouge-score sacrebleu pyyaml
 
-# Credential Evolution LLM — KHÔNG hardcode vào code:
+# Credential cho Target LLM và Evolution LLM qua API:
 cp .env.example .env        # rồi điền giá trị thật vào 2 biến (xem §4)
 
 # Tải dataset (parquet lớn, ngoài git):
@@ -50,7 +49,7 @@ nhận (file `.env` chỉ được nạp nếu có, không ghi đè biến có s
 | Cách gọi | Một lượt qua endpoint OpenAI-compatible của nhóm | Một lượt qua OpenRouter với reasoning | Transformers load `medgemma-27b-text-it` 4-bit |
 | Credential | `EVOLUTION_LLM_BASE_URL`, `EVOLUTION_LLM_API_KEY` | `OPENROUTER_API_KEY` | `HF_TOKEN` để tải model nếu cần |
 | Model mặc định | `google/medgemma-27b-text-it` | `openai/gpt-oss-20b` | `google/medgemma-27b-text-it` |
-| Yêu cầu GPU | Target 4B và BERTScore | Target 4B và BERTScore | Thêm 27B 4-bit, dùng Kaggle **2×T4** hoặc 1 GPU ≥24GB |
+| Yêu cầu GPU cho Evolution LLM | Chạy trên endpoint | Chạy trên OpenRouter | 27B 4-bit, dùng Kaggle **2×T4** hoặc 1 GPU ≥24GB |
 
 Chọn bằng `--evolution-provider` và dùng `--evolution-model-id ID` nếu muốn đổi model cho lần chạy hiện tại. Hai cờ dùng được với CLI Python và script Kaggle. Với `openai`, ID là tên model trên endpoint. Với `local`, ID là tên repo Hugging Face.
 
@@ -102,7 +101,7 @@ os.environ["EVOLUTION_LLM_BASE_URL"] = secrets.get_secret("EVOLUTION_LLM_BASE_UR
 os.environ["EVOLUTION_LLM_API_KEY"] = secrets.get_secret("EVOLUTION_LLM_API_KEY")
 ```
 
-`HF_TOKEN` cần có quyền tải target model. Nếu dùng OpenRouter, thay hai dòng `EVOLUTION_LLM_*` bằng dòng dưới đây, rồi dùng `--evolution-provider openrouter` trong cell chạy. Nếu dùng Evolution LLM local, dùng `--evolution-provider local` và bỏ hai dòng `EVOLUTION_LLM_*`.
+Hai biến `EVOLUTION_LLM_*` cũng cấp URL và key cho Target LLM mặc định. Nếu chuyển riêng Evolution LLM sang OpenRouter qua `--evolution-provider openrouter`, nạp thêm secret bên dưới. Khi dùng MedGemma local, `HF_TOKEN` cần có quyền tải model.
 
 ```python
 os.environ["OPENROUTER_API_KEY"] = secrets.get_secret("OPENROUTER_API_KEY")
@@ -110,13 +109,13 @@ os.environ["OPENROUTER_API_KEY"] = secrets.get_secret("OPENROUTER_API_KEY")
 
 **Cell 3. Chạy thử**
 
-Thay `MODEL_ID_CUA_ENDPOINT` bằng tên model mà endpoint cung cấp.
+Ví dụ dưới đây dùng `Qwen3.5-9B` làm Evolution LLM. ID phải khớp với tên model trên endpoint.
 
 ```python
 !bash deployment/kaggle/run.sh \
   --mode smoke \
   --work-root /kaggle/working/it4906 \
-  --evolution-model-id MODEL_ID_CUA_ENDPOINT
+  --evolution-model-id "Qwen3.5-9B"
 ```
 
 Chạy thử qua OpenRouter với model mặc định:
@@ -134,14 +133,16 @@ Chạy thử qua OpenRouter với model mặc định:
 !bash deployment/kaggle/run.sh \
   --mode evolve \
   --work-root /kaggle/working/it4906 \
-  --evolution-model-id MODEL_ID_CUA_ENDPOINT
+  --evolution-model-id "Qwen3.5-9B"
 ```
 
 `smoke` ghi vào `/kaggle/working/it4906/runs/de_smoke/`, còn `evolve` ghi vào `/kaggle/working/it4906/runs/de/`. Kết quả cuối là `best_prompt.json`. Để tiếp tục ở session mới, chép thư mục kết quả cũ vào đúng thư mục output và gọi lại `evolve` với cấu hình cũ. Runner tự tìm `checkpoint.json`.
 
 Log notebook cho biết thế hệ và ứng viên đang xử lý, số mẫu đã sinh Findings, bước tính từng metric và lúc lưu checkpoint. Các bước chờ lâu in thêm dòng `chưa hoàn tất` khoảng mỗi 15 giây. Khi resume, log cho biết phản hồi và điểm nào được dùng lại.
 
-Trên máy có hai GPU CUDA, thêm `--target-gpus 2` để đặt một bản MedGemma trên mỗi GPU. `target_llm.batch_size` là số mẫu mỗi GPU. Với `batch_size: 4`, hai GPU có thể xử lý cùng lúc 8 mẫu của một ứng viên, rồi ghép dự đoán đúng thứ tự trước khi tính fitness. Khi dùng greedy mặc định, có thể thêm cờ vào lệnh resume cùng `--work-root` để dùng lại checkpoint và cache. BERTScore vẫn ưu tiên GPU 1 trong bước chấm fitness, nên GPU này cần đủ bộ nhớ cho cả hai model.
+Target qua API gửi một ảnh X-quang và prompt trong mỗi request. Điều chỉnh số request đồng thời qua `--set target_llm.api_concurrency N` (mặc định 2). Dùng `--target-model-id ID` để đổi sang model khác có hỗ trợ ảnh trên endpoint. Có thể đặt `target_llm.base_url_env` và `target_llm.api_key_env` để trỏ đến hai biến môi trường riêng. Nếu endpoint khác không cần tùy chọn thinking của Qwen, dùng `--set target_llm.extra_body null`.
+
+Để chạy MedGemma trên hai GPU CUDA, thêm `--target-provider local --target-gpus 2`. Với `target_llm.batch_size: 4`, hai GPU có thể xử lý cùng lúc 8 mẫu của một ứng viên. BERTScore vẫn ưu tiên GPU 1 trong bước chấm fitness.
 
 Thêm `--val-num-samples 50` để chấm trên 50 mẫu đầu của `val`, hoặc `--set de.iterations 3` để giảm số thế hệ. Mặc định là 200 mẫu và `smoke` vẫn giới hạn tối đa 5 mẫu. Khi đổi số mẫu, fitness được tính lại theo tập mới. Dùng một `--work-root` riêng nếu muốn giữ hai run để so sánh.
 
@@ -153,9 +154,9 @@ Thêm `--val-num-samples 50` để chấm trên 50 mẫu đầu của `val`, ho�
   --work-root /kaggle/working/it4906
 ```
 
-Cell đọc `best_prompt.json` và cấu hình đã lưu của run rồi dùng Target LLM sinh Findings trên toàn bộ `test`. Bước này dùng quyền tải Target LLM qua `HF_TOKEN`. Kết quả nằm trong `runs/de/test_eval/` dưới `--work-root`, gồm `metrics.json` với BERTScore F1, ROUGE-L F1, fitness và corpus BLEU (SacreBLEU, thang 0–100), cùng `predictions.jsonl` chứa dự đoán và tham chiếu theo từng mẫu. Fitness dùng để chọn prompt trên `val` được ghi riêng trong `selection_fitness`.
+Cell đọc `best_prompt.json` và cấu hình đã lưu của run rồi dùng cùng provider và model Target LLM để sinh Findings trên toàn bộ `test`. Kết quả nằm trong `runs/de/test_eval/` dưới `--work-root`, gồm `metrics.json` với BERTScore F1, ROUGE-L F1, fitness và corpus BLEU (SacreBLEU, thang 0–100), cùng `predictions.jsonl` chứa dự đoán và tham chiếu theo từng mẫu. Fitness dùng để chọn prompt trên `val` được ghi riêng trong `selection_fitness`.
 
-Thêm `--target-gpus 2` để dùng cả hai GPU khi sinh Findings trên test, kể cả khi run đã được tiến hóa trên một GPU. Bỏ cờ sẽ dùng số GPU từ cấu hình lưu cùng run. Bước đánh giá giải phóng MedGemma trước khi tính metric trên toàn bộ kết quả đã ghép.
+Với run dùng Target LLM local, có thể thêm `--target-gpus 2` để dùng cả hai GPU khi sinh Findings trên test. Bước đánh giá giải phóng MedGemma trước khi tính metric.
 
 Log đánh giá hiện số mẫu test có Findings sau mỗi batch, lúc nạp BERTScore, lúc tính BERTScore, ROUGE-L và BLEU, cùng đường dẫn `metrics.json`.
 
@@ -214,8 +215,9 @@ Smoke luôn ghi vào `runs/de_smoke/`, không đụng full run.
 |---|---|---|---|
 | seed | | 5 | official default |
 | data | num_samples | 200 | 200 sample ĐẦU của val (thứ tự parquet gốc — cần nhóm xác nhận) |
-| target_llm | batch_size | **4** (official 16) | ⚠️ lệch official vì VRAM T4; GPU ≥24GB có thể trả lại 16 |
-| target_llm | dtype | bfloat16 | ⚠️ fp16 gây NaN trên Gemma3/T4 — KHÔNG đổi lại |
+| target_llm | api_concurrency | 2 | Số request API đồng thời |
+| target_llm | batch_size | 4 | Số mẫu mỗi GPU khi chạy local |
+| target_llm | dtype | bfloat16 | Kiểu trọng số khi chạy local |
 | fitness | weight | 0.7 BERTScore + 0.3 ROUGE-L | chốt tạm 10/11, swappable qua config |
 | evolution_llm | max_new_tokens | **1500** (official 1000) | ⚠️ lệch official: 27B trích-dẫn donors làm cắt cụt thẻ `<prompt>` (thật 12/11) |
 | evolution_llm | temperature / top_p | 0.5 / 0.95 | official default |

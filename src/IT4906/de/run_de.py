@@ -14,12 +14,13 @@ import yaml
 
 from .de_loop import DERunner
 from .evolution_llm import DEFAULT_EVOLUTION_MODELS
+from .target_llm import DEFAULT_TARGET_MODELS
 
 
 def load_env() -> None:
     """Nạp biến môi trường từ file `.env` ở thư mục chạy (nếu có python-dotenv).
 
-    base_url + api_key của Evolution LLM KHÔNG hardcode vào code/repo (chỉ dẫn
+    base_url + api_key của các LLM KHÔNG hardcode vào code/repo (chỉ dẫn
     Dũng 2026-11-13) — điền vào `.env` (đã git-ignore); thiếu dotenv thì biến
     môi trường vẫn đọc được nếu đã export thủ công."""
     try:
@@ -45,7 +46,9 @@ def main() -> None:
     parser.add_argument("--config", default="configs/de.yaml")
     parser.add_argument("--smoke", action="store_true", help="5 sample × 1 thế hệ")
     parser.add_argument("--val-num-samples", type=int, metavar="N", help="dùng N mẫu đầu của tập validation")
-    parser.add_argument("--target-gpus", type=int, choices=(1, 2), help="số GPU chạy Target LLM")
+    parser.add_argument("--target-gpus", type=int, choices=(1, 2), help="số GPU chạy Target LLM local")
+    parser.add_argument("--target-provider", choices=tuple(DEFAULT_TARGET_MODELS), help="chọn provider của Target LLM")
+    parser.add_argument("--target-model-id", metavar="ID", help="ghi đè model_id của Target LLM")
     parser.add_argument(
         "--evolution-provider", choices=tuple(DEFAULT_EVOLUTION_MODELS),
         help="chọn provider của Evolution LLM",
@@ -62,6 +65,8 @@ def main() -> None:
         parser.error("--val-num-samples phải là số nguyên dương.")
     if args.evolution_model_id is not None and not args.evolution_model_id.strip():
         parser.error("--evolution-model-id cần một ID model.")
+    if args.target_model_id is not None and not args.target_model_id.strip():
+        parser.error("--target-model-id cần một ID model.")
 
     load_env()
 
@@ -79,6 +84,10 @@ def main() -> None:
         cfg["evolution_llm"]["provider"] = args.evolution_provider
     if args.evolution_model_id is not None:
         cfg["evolution_llm"]["model_id"] = args.evolution_model_id
+    if args.target_provider is not None:
+        cfg["target_llm"]["provider"] = args.target_provider
+    if args.target_model_id is not None:
+        cfg["target_llm"]["model_id"] = args.target_model_id
     if args.target_gpus is not None:
         cfg["target_llm"]["num_gpus"] = args.target_gpus
     if args.val_num_samples is not None:
