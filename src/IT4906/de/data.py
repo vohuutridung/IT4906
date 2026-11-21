@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import glob
 import os
+import re
 from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
@@ -29,6 +30,13 @@ PLACEHOLDER_ALIASES = {
     "Kĩ thuật": "Kỹ thuật",  # placeholder -> cột
     "Kỹ thuật": "Kỹ thuật",
 }
+_PLACEHOLDER_RE = re.compile(r"\{(" + "|".join(map(re.escape, PLACEHOLDER_ALIASES)) + r")\}")
+
+# Đổi khi cách render prompt thay đổi kết quả: được đưa vào key cache fitness và
+# fingerprint checkpoint để không tái dùng điểm chấm trên prompt render kiểu cũ.
+# v2 (2026-11-21): {View}/{Kĩ thuật} trước đây không được thay vì render_prompt
+# format_map thẳng theo tên cột (view, Kỹ thuật) thay vì qua PLACEHOLDER_ALIASES.
+PROMPT_RENDER_VERSION = "placeholder-alias.v2"
 
 
 @dataclass
@@ -108,14 +116,13 @@ def render_prompt(template: str, sample: Sample, append_metadata: bool = True) -
     """Render prompt evolve + metadata của sample.
 
     - Nếu template chứa placeholder {Ages} {sex} {View} {Ghi chú} {Kĩ thuật} -> substitute
-      (format_map an toàn: placeholder lạ giữ nguyên).
+      qua PLACEHOLDER_ALIASES (ngoặc nhọn khác giữ nguyên văn).
     - Nếu template KHÔNG chứa placeholder nào -> nối thêm dòng metadata + câu hỏi
       theo format Stage 1 của paper ViX-Ray.
     """
     meta = dict(sample.meta)
-    if "{" in template:
-        filled = template.format_map(_SafeDict(meta))
-        return filled.strip()
+    if _PLACEHOLDER_RE.search(template):
+        return substitute_placeholders(template, meta).strip()
     rendered = template.strip()
     if append_metadata:
         meta_line = (
@@ -126,12 +133,14 @@ def render_prompt(template: str, sample: Sample, append_metadata: bool = True) -
     return rendered.strip()
 
 
-class _SafeDict(dict):
-    def __missing__(self, key: str) -> str:
-        return "{" + key + "}"
-
-
 def substitute_placeholders(template: str, meta: dict[str, Any]) -> str:
-    """Substitute placeholder theo alias (xử lý cả 'Kĩ thuật' vs 'Kỹ thuật')."""
-    resolved = {alias: meta[col] for alias, col in PLACEHOLDER_ALIASES.items() if col in meta}
-    return template.format_map(_SafeDict(resolved))
+    """Substitute placeholder theo alias ('View' -> cột view, 'Kĩ thuật' -> cột 'Kỹ thuật').
+
+    Chỉ thay các placeholder đã biết; ngoặc nhọn khác (VD prompt tiến hóa chứa JSON)
+    giữ nguyên văn thay vì làm format_map lỗi. Placeholder thiếu cột giữ nguyên.
+    """
+    def repl(match: re.Match) -> str:
+        column = PLACEHOLDER_ALIASES[match.group(1)]
+        return str(meta[column]) if column in meta else match.group(0)
+
+    return _PLACEHOLDER_RE.sub(repl, template)

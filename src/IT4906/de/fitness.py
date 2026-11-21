@@ -15,6 +15,7 @@ from importlib import import_module
 from pathlib import Path
 
 from .artifacts import write_json
+from .data import PROMPT_RENDER_VERSION
 from .progress import progress_stage
 
 
@@ -118,7 +119,8 @@ class FitnessEvaluator:
         # chấm trên thang 100 sample được tái dùng âm thầm cho run dev 200 (poison vector
         # 2026-11-13). Đổi num_samples → key đổi → tự re-score từ gen cache (vài phút),
         # không bao giờ trộn 2 thang đo vào cùng bảng xếp hạng.
-        k = hashlib.sha1(f"{len(refs)}||{prompt_text}".encode("utf-8")).hexdigest()
+        # Gồm PROMPT_RENDER_VERSION: key theo prompt GỐC, nên đổi cách render phải tách cache.
+        k = hashlib.sha1(f"{PROMPT_RENDER_VERSION}||{len(refs)}||{prompt_text}".encode("utf-8")).hexdigest()
         if k in self.cache:
             print(f"{progress} dùng fitness đã lưu cho {len(refs)} mẫu", flush=True)
             return self.cache[k]

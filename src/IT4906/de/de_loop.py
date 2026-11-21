@@ -21,7 +21,7 @@ from uuid import uuid4
 import numpy as np
 
 from .artifacts import write_json
-from .data import DEFAULT_DATASET_ID, Sample, load_split, render_prompt
+from .data import DEFAULT_DATASET_ID, PROMPT_RENDER_VERSION, Sample, load_split, render_prompt
 from .evolution_llm import INSTRUCTION_TEMPLATE, EvolutionLLM, parse_final_prompt
 from .fitness import FitnessEvaluator, check_metric_dependencies
 from .progress import progress_stage
@@ -63,6 +63,8 @@ def run_fingerprint(cfg: dict) -> str:
     cfg2.get("fitness", {}).pop("device", None)
     if "target_llm" in cfg2:
         cfg2["target_llm"] = target_result_config(cfg2["target_llm"])
+    # Checkpoint chấm trên prompt render kiểu cũ không được resume lẫn với điểm mới.
+    cfg2["prompt_render_version"] = PROMPT_RENDER_VERSION
     payload = json.dumps(cfg2, sort_keys=True, ensure_ascii=False)
     return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:10]
 
