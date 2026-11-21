@@ -1,5 +1,7 @@
 # IT4906 — Phân tích dữ liệu X-quang ngực tiếng Việt
 
+Kaggle notebook chạy full pipeline (giải thuật DE): https://www.kaggle.com/code/vohuutridung/it4906-pipeline
+
 Project chứa prompt tạo báo cáo `Findings`, script tải dataset VNMedical_bv175, notebook phân tích khám phá dữ liệu và config cho các pipeline de/ga.
 
 ## Cài đặt
