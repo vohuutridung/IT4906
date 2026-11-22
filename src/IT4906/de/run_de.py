@@ -47,6 +47,7 @@ def main() -> None:
     parser.add_argument("--smoke", action="store_true", help="5 sample × 1 thế hệ")
     parser.add_argument("--val-num-samples", type=int, metavar="N", help="dùng N mẫu đầu của tập validation")
     parser.add_argument("--target-gpus", type=int, choices=(1, 2), help="số GPU chạy Target LLM local")
+    parser.add_argument("--target-batch-size", type=int, metavar="N", help="số mẫu mỗi batch trên mỗi GPU của Target LLM local")
     parser.add_argument("--target-provider", choices=tuple(DEFAULT_TARGET_MODELS), help="chọn provider của Target LLM")
     parser.add_argument("--target-model-id", metavar="ID", help="ghi đè model_id của Target LLM")
     parser.add_argument(
@@ -63,6 +64,8 @@ def main() -> None:
     args = parser.parse_args()
     if args.val_num_samples is not None and args.val_num_samples < 1:
         parser.error("--val-num-samples phải là số nguyên dương.")
+    if args.target_batch_size is not None and args.target_batch_size < 1:
+        parser.error("--target-batch-size phải là số nguyên dương.")
     if args.evolution_model_id is not None and not args.evolution_model_id.strip():
         parser.error("--evolution-model-id cần một ID model.")
     if args.target_model_id is not None and not args.target_model_id.strip():
@@ -90,6 +93,10 @@ def main() -> None:
         cfg["target_llm"]["model_id"] = args.target_model_id
     if args.target_gpus is not None:
         cfg["target_llm"]["num_gpus"] = args.target_gpus
+    if args.target_batch_size is not None:
+        if cfg["target_llm"].get("provider", "local") != "local":
+            parser.error("--target-batch-size chỉ dùng cho Target LLM local.")
+        cfg["target_llm"]["batch_size"] = args.target_batch_size
     if args.val_num_samples is not None:
         cfg["data"]["num_samples"] = args.val_num_samples
 

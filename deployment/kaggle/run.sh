@@ -18,6 +18,8 @@ Options for smoke and evolve:
   --target-model-id ID
                       Override the model ID for the Target LLM.
   --target-gpus N     Replicate a local Target LLM on 1 or 2 CUDA GPUs (default: 1).
+  --target-batch-size N
+                      Local Target LLM inference batch size per GPU.
   --val-num-samples N Use the first N validation samples (config default: 200, smoke cap: 5).
   --data-root PATH    Use attached Parquet files instead of streaming from Hugging Face.
   --work-root PATH    Write to PATH/runs/de or PATH/runs/de_smoke (default: /kaggle/working).
@@ -32,6 +34,8 @@ Options for smoke and evolve:
 
 Options for evaluate:
   --target-gpus N     Override the local target GPU count saved with the run.
+  --target-batch-size N
+                      Override the local target inference batch size per GPU for this evaluation.
   --work-root PATH    Find the run at PATH/runs/de (default: /kaggle/working).
   --run-dir PATH      Read best_prompt.json and run_config.json from PATH instead.
   --data-root PATH    Override the saved Parquet dataset root for test evaluation.
@@ -60,6 +64,7 @@ run_dir=""
 eval_num_samples=""
 val_num_samples=""
 target_gpus=""
+target_batch_size=""
 local_folder=""
 hf_folder=""
 overrides=()
@@ -70,7 +75,7 @@ while [[ $# -gt 0 ]]; do
             usage
             exit 0
             ;;
-        --mode|--data-root|--work-root|--config|--run-dir|--eval-num-samples|--val-num-samples|--target-gpus|--local-folder|--hf-folder|--init-mode|--target-provider|--target-model-id|--evolution-provider|--evolution-model-id)
+        --mode|--data-root|--work-root|--config|--run-dir|--eval-num-samples|--val-num-samples|--target-gpus|--target-batch-size|--local-folder|--hf-folder|--init-mode|--target-provider|--target-model-id|--evolution-provider|--evolution-model-id)
             [[ $# -ge 2 && -n "$2" && "$2" != --* ]] || fail "$1 requires a value."
             case "$1" in
                 --mode) mode="$2" ;;
@@ -81,6 +86,7 @@ while [[ $# -gt 0 ]]; do
                 --eval-num-samples) eval_num_samples="$2" ;;
                 --val-num-samples) val_num_samples="$2" ;;
                 --target-gpus) target_gpus="$2" ;;
+                --target-batch-size) target_batch_size="$2" ;;
                 --local-folder) local_folder="$2" ;;
                 --hf-folder) hf_folder="$2" ;;
                 --init-mode) overrides+=(--set de.initial_mode "$2") ;;
@@ -114,6 +120,11 @@ target_args=()
 if [[ -n "$target_gpus" ]]; then
     [[ "$target_gpus" == 1 || "$target_gpus" == 2 ]] || fail "--target-gpus must be 1 or 2."
     target_args=(--target-gpus "$target_gpus")
+fi
+if [[ -n "$target_batch_size" ]]; then
+    [[ "$mode" == smoke || "$mode" == evolve || "$mode" == evaluate ]] \
+        || fail "--target-batch-size is for smoke, evolve, and evaluate."
+    target_args+=(--target-batch-size "$target_batch_size")
 fi
 
 case "$mode" in

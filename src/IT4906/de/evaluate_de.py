@@ -20,10 +20,18 @@ from .target_llm import TargetLLM, resolve_target_config, target_result_config
 
 
 def evaluate(
-    run_dir: Path, config_path: Path, data_root: str | None, limit: int | None, *, target_gpus: int | None = None
+    run_dir: Path,
+    config_path: Path,
+    data_root: str | None,
+    limit: int | None,
+    *,
+    target_gpus: int | None = None,
+    target_batch_size: int | None = None,
 ) -> dict:
     if limit is not None and limit < 1:
         raise ValueError("--num-samples phải lớn hơn 0.")
+    if target_batch_size is not None and target_batch_size < 1:
+        raise ValueError("--target-batch-size phải là số nguyên dương.")
 
     check_metric_dependencies(include_bleu=True)
     from sacrebleu.metrics import BLEU
@@ -50,7 +58,12 @@ def evaluate(
     eval_dir = run_dir / ("test_eval" if limit is None else f"test_eval_first_{limit}")
     set_seed(int(config.get("seed", 5)))
 
-    target_cfg = resolve_target_config(config["target_llm"], config.get("evolution_llm"))
+    target_cfg = config["target_llm"].copy()
+    if target_batch_size is not None:
+        if target_cfg.get("provider", "local") != "local":
+            raise ValueError("--target-batch-size chỉ dùng cho Target LLM local.")
+        target_cfg["batch_size"] = target_batch_size
+    target_cfg = resolve_target_config(target_cfg, config.get("evolution_llm"))
     if target_gpus is not None:
         target_cfg["num_gpus"] = target_gpus
     # Tách cache test khỏi các mẫu validation và khỏi các cấu hình target khác.
@@ -114,9 +127,13 @@ def main() -> None:
     parser.add_argument("--data-root")
     parser.add_argument("--num-samples", type=int)
     parser.add_argument("--target-gpus", type=int, choices=(1, 2), help="số GPU chạy Target LLM local")
+    parser.add_argument("--target-batch-size", type=int, metavar="N", help="số mẫu mỗi batch trên mỗi GPU của Target LLM local")
     args = parser.parse_args()
     load_env()
-    evaluate(args.run_dir, args.config, args.data_root, args.num_samples, target_gpus=args.target_gpus)
+    evaluate(
+        args.run_dir, args.config, args.data_root, args.num_samples,
+        target_gpus=args.target_gpus, target_batch_size=args.target_batch_size,
+    )
 
 
 if __name__ == "__main__":
