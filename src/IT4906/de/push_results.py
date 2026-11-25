@@ -1,6 +1,7 @@
 """Upload an EvoPrompt-DE results folder to the IT4906 dataset repository."""
 
 import argparse
+import json
 import os
 from pathlib import Path, PurePosixPath
 
@@ -8,6 +9,41 @@ from huggingface_hub import HfApi
 
 
 REPO_ID = "vohuutridung/IT4906-TTTH"
+
+
+def _read_result(path: Path) -> dict:
+    try:
+        result = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return {}
+    return result if isinstance(result, dict) else {}
+
+
+def _report_run_status(folder: Path) -> None:
+    snapshot = _read_result(folder / "run_config.json")
+    run_id = snapshot.get("run_id")
+    if not run_id:
+        return
+
+    best = _read_result(folder / "best_prompt.json")
+    if best.get("run_id") == run_id and best.get("run_fp") == snapshot.get("run_fp"):
+        evaluation = _read_result(folder / "test_eval" / "metrics.json")
+        if evaluation.get("run_id") != run_id:
+            print("[push-results] Cảnh báo: run đã có best prompt nhưng thiếu eval test đầy đủ cho run này.")
+        return
+
+    checkpoint = _read_result(folder / "checkpoint.json")
+    if checkpoint.get("run_id") == run_id and checkpoint.get("run_fp") == snapshot.get("run_fp"):
+        progress = f"checkpoint sau thế hệ {checkpoint.get('step_done')}"
+    else:
+        initial = _read_result(folder / "evolution" / run_id / "initial_population.json")
+        if "candidates" in initial:
+            scored = len(initial["evaluated_prompts"])
+            total = len(initial["candidates"])
+            progress = f"đã chấm {scored}/{total} prompt khởi tạo"
+        else:
+            progress = "chưa có checkpoint P0"
+    print(f"[push-results] Cảnh báo: đang upload kết quả dở dang ({progress}).")
 
 
 def main() -> None:
@@ -26,6 +62,7 @@ def main() -> None:
         parser.error("Cần đặt HF_TOKEN có quyền ghi vào dataset repo.")
 
     local_folder = args.local_folder.resolve()
+    _report_run_status(local_folder)
     print(f"[push-results] {local_folder} → {REPO_ID}/{hf_folder}")
     commit = HfApi().upload_folder(
         repo_id=REPO_ID,

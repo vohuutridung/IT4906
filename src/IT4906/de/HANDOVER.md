@@ -173,7 +173,7 @@ Nạp `HF_TOKEN` có quyền ghi vào dataset `vohuutridung/IT4906-TTTH` trướ
   --hf-folder runs/qwen35-9b
 ```
 
-Nội dung `runs/de/`, gồm các thư mục con, được đưa trực tiếp vào `runs/qwen35-9b/` của repo. Script in URL commit sau khi upload.
+Nội dung `runs/de/`, gồm các thư mục con, được đưa trực tiếp vào `runs/qwen35-9b/` của repo. Script báo nếu run còn dở dang hoặc chưa có điểm trên toàn bộ tập test, rồi in URL commit sau khi upload.
 
 ### Chọn chiến lược khởi tạo quần thể
 
@@ -198,6 +198,7 @@ Tất cả nằm trong `runs/de/` (hoặc thư mục `de.cache_dir`):
 | `checkpoint.json` | Lưu quần thể, lịch sử và trạng thái chọn donor của NumPy sau mỗi thế hệ |
 | `run_config.json` | Cấu hình thực tế sau khi áp dụng các cờ CLI, gồm model ID và mã run |
 | `evolution/<run_id>/` | Cấu hình kèm template, quần thể khởi tạo, phản hồi nguyên văn của từng ứng viên, điểm, quyết định giữ hoặc thay prompt, và kết quả cuối |
+| `evolution/<run_id>/initial_population.json` | Danh sách ứng viên khởi tạo và điểm kèm nội dung prompt, cập nhật sau mỗi lần chấm. Quần thể P₀ xuất hiện khi hoàn thành chấm và chọn prompt |
 | `checkpoint_stale.json` | Checkpoint sinh từ config KHÁC bị đổi tên thế này (chống trộn fitness 2 thang đo) — có thể xóa |
 | `cache/<data_fp>/gen_cache_<fp>.jsonl` | Cache generation target 4B, tách theo nguồn dữ liệu, split và cấu hình sinh |
 | `cache/<data_fp>/fitness_cache_<fp>.json` | Cache điểm fitness, tách theo nguồn dữ liệu, split và cấu hình metric |
