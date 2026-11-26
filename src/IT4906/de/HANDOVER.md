@@ -142,7 +142,7 @@ Log notebook cho biết thế hệ và ứng viên đang xử lý, số mẫu đ
 
 Target qua API gửi một ảnh X-quang và prompt trong mỗi request. Điều chỉnh số request đồng thời qua `--set target_llm.api_concurrency N` (mặc định 2). Dùng `--target-model-id ID` để đổi sang model khác có hỗ trợ ảnh trên endpoint. Có thể đặt `target_llm.base_url_env` và `target_llm.api_key_env` để trỏ đến hai biến môi trường riêng. Nếu endpoint khác không cần tùy chọn thinking của Qwen, dùng `--set target_llm.extra_body null`.
 
-Để chạy MedGemma trên hai GPU CUDA, thêm `--target-provider local --target-gpus 2`. Với `target_llm.batch_size: 4`, hai GPU có thể xử lý cùng lúc 8 mẫu của một ứng viên. BERTScore vẫn ưu tiên GPU 1 trong bước chấm fitness.
+Để chạy MedGemma trên hai GPU CUDA, thêm `--target-provider local --target-gpus 2`. Thêm `--target-batch-size 8` để mỗi GPU xử lý 8 mẫu mỗi lượt, tổng cộng tối đa 16 mẫu. BERTScore vẫn ưu tiên GPU 1 trong bước chấm fitness.
 
 Thêm `--val-num-samples 50` để chấm trên 50 mẫu đầu của `val`, hoặc `--set de.iterations 3` để giảm số thế hệ. Mặc định là 200 mẫu và `smoke` vẫn giới hạn tối đa 5 mẫu. Khi đổi số mẫu, fitness được tính lại theo tập mới. Dùng một `--work-root` riêng nếu muốn giữ hai run để so sánh.
 
@@ -156,7 +156,7 @@ Thêm `--val-num-samples 50` để chấm trên 50 mẫu đầu của `val`, ho�
 
 Cell đọc `best_prompt.json` và cấu hình đã lưu của run rồi dùng cùng provider và model Target LLM để sinh Findings trên toàn bộ `test`. Kết quả nằm trong `runs/de/test_eval/` dưới `--work-root`, gồm `metrics.json` với BERTScore F1, ROUGE-L F1, fitness và corpus BLEU (SacreBLEU, thang 0–100), cùng `predictions.jsonl` chứa dự đoán và tham chiếu theo từng mẫu. Fitness dùng để chọn prompt trên `val` được ghi riêng trong `selection_fitness`.
 
-Với run dùng Target LLM local, có thể thêm `--target-gpus 2` để dùng cả hai GPU khi sinh Findings trên test. Bước đánh giá giải phóng MedGemma trước khi tính metric.
+Với run dùng Target LLM local, có thể thêm `--target-gpus 2` để dùng cả hai GPU khi sinh Findings trên test và `--target-batch-size N` để đổi batch size mỗi GPU cho lần đánh giá này. Nếu bỏ các cờ này, `evaluate` dùng giá trị đã lưu khi chạy `evolve`. Bước đánh giá giải phóng MedGemma trước khi tính metric.
 
 Log đánh giá hiện số mẫu test có Findings sau mỗi batch, lúc nạp BERTScore, lúc tính BERTScore, ROUGE-L và BLEU, cùng đường dẫn `metrics.json`.
 
@@ -173,7 +173,7 @@ Nạp `HF_TOKEN` có quyền ghi vào dataset `vohuutridung/IT4906-TTTH` trướ
   --hf-folder runs/qwen35-9b
 ```
 
-Nội dung `runs/de/`, gồm các thư mục con, được đưa trực tiếp vào `runs/qwen35-9b/` của repo. Script in URL commit sau khi upload.
+Nội dung `runs/de/`, gồm các thư mục con, được đưa trực tiếp vào `runs/qwen35-9b/` của repo. Script báo nếu run còn dở dang hoặc chưa có điểm trên toàn bộ tập test, rồi in URL commit sau khi upload.
 
 ### Chọn chiến lược khởi tạo quần thể
 
@@ -198,6 +198,7 @@ Tất cả nằm trong `runs/de/` (hoặc thư mục `de.cache_dir`):
 | `checkpoint.json` | Lưu quần thể, lịch sử và trạng thái chọn donor của NumPy sau mỗi thế hệ |
 | `run_config.json` | Cấu hình thực tế sau khi áp dụng các cờ CLI, gồm model ID và mã run |
 | `evolution/<run_id>/` | Cấu hình kèm template, quần thể khởi tạo, phản hồi nguyên văn của từng ứng viên, điểm, quyết định giữ hoặc thay prompt, và kết quả cuối |
+| `evolution/<run_id>/initial_population.json` | Danh sách ứng viên khởi tạo và điểm kèm nội dung prompt, cập nhật sau mỗi lần chấm. Quần thể P₀ xuất hiện khi hoàn thành chấm và chọn prompt |
 | `checkpoint_stale.json` | Checkpoint sinh từ config KHÁC bị đổi tên thế này (chống trộn fitness 2 thang đo) — có thể xóa |
 | `cache/<data_fp>/gen_cache_<fp>.jsonl` | Cache generation target 4B, tách theo nguồn dữ liệu, split và cấu hình sinh |
 | `cache/<data_fp>/fitness_cache_<fp>.json` | Cache điểm fitness, tách theo nguồn dữ liệu, split và cấu hình metric |

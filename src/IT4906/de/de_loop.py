@@ -157,16 +157,30 @@ class DERunner:
         else:
             candidates = pool if ranked else pool[:self.N]
 
+        audit_path = self.audit_dir / "initial_population.json"
+        audit = {
+            "status": "in_progress",
+            "candidates": candidates,
+            "population": [],
+            "evaluated_prompts": self.evaluated,
+        }
+        write_json(audit_path, audit)
         print(f"[init] mode={self.initial_mode}, pool={len(pool)}, eval={len(candidates)}")
         for i, prompt in enumerate(candidates, start=1):
             progress = f"[pool {i}/{len(candidates)}]"
             scores = self.evaluate_prompt(prompt, progress=progress)
             self.evaluated[prompt] = scores
+            write_json(audit_path, audit)
             print(f"{progress} fitness={scores['fitness']:.4f} ({prompt[:60]}...)", flush=True)
 
-        if ranked:
-            candidates.sort(key=lambda p: self.evaluated[p]["fitness"], reverse=self.initial_mode == "top")
-        return candidates[:self.N]
+        ordered = (
+            sorted(candidates, key=lambda p: self.evaluated[p]["fitness"], reverse=self.initial_mode == "top")
+            if ranked else candidates
+        )
+        population = ordered[:self.N]
+        audit.update(status="complete", population=population)
+        write_json(audit_path, audit)
+        return population
 
     # ---------- checkpoint ----------
     def _save_checkpoint(self, step_done: int, population: list[str], best_prompt: str, best_score: float) -> None:
@@ -248,9 +262,6 @@ class DERunner:
             best_score = self.evaluated[best_prompt]["fitness"]
             print(f"[P0] mode={self.initial_mode}, size={len(population)}, best={best_score:.4f}")
             step_done = 0  # lần đầu chạy: chưa có thế hệ nào hoàn thành
-            write_json(self.audit_dir / "initial_population.json", {
-                "population": population, "evaluated_prompts": self.evaluated,
-            })
             self._save_checkpoint(0, population, best_prompt, best_score)
         else:
             step_done, population, best_prompt, best_score = resumed
