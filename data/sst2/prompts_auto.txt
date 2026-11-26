@@ -1,0 +1,10 @@
+Decide whether the movie-review excerpt expresses a positive or negative opinion.
+Judge whether the reviewer mainly praises or criticizes the film or the aspect being reviewed.
+Identify the attitude expressed by the reviewer. Separate that attitude from the mood of the plot or the characters.
+Interpret the excerpt as a whole, paying attention to which words fall under a negation or qualification.
+If the text contains both praise and criticism, choose the sentiment of the judgment the reviewer ultimately emphasizes.
+Read the excerpt for implied approval or disapproval, including sarcasm, understatement, and rhetorical questions.
+Identify the reviewer's key evaluative phrase and use its meaning in context to decide the polarity of the excerpt.
+Decide whether the excerpt presents the film experience as rewarding or disappointing from the reviewer's perspective.
+Treat short phrases as review fragments. Infer their polarity from the evaluation actually expressed in the fragment.
+Weigh the reviewer's overall verdict more heavily than isolated positive or negative words in the text.

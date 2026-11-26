@@ -1,0 +1,10 @@
+Identify the category of each input (e.g. Tech, Sports, World, Business).
+Identify the category (tech, sports, world, business) of the given information.
+Categorize the articles according to their topic: Tech, Sports, World, Business.
+Classify each input into one of the following categories: Tech, Sports, World, or Business.
+Classify the input into one of three categories (Tech, Business, or Sports).
+Classify the given information into one of three categories: tech, business, or sports.
+Classify each input-output pair according to the topic.
+Provide the category for the given news article.
+You will be required to classify a news article as World, Sports, Business, or Tech based on its primary topic.
+In this task, you are given a news article. Your task is to classify the article to one out of the four topics "World", "Sports", "Business", "Tech" if the article"s main topic is relevant to the world, sports, business, and technology, correspondingly. If you are not sure about the topic, choose the closest option.

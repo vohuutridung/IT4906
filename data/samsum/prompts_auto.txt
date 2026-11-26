@@ -1,0 +1,10 @@
+Summarize the conversation in one or two sentences, covering the main topic and what the participants decide or do.
+Write a short third-person recap. Name the relevant speakers and make clear who did, agreed to do, or asked for what.
+Capture the situation at the start and the outcome at the end, retaining the exchange that explains the outcome.
+Extract the essential plan from the chat: who is involved, what they will do, and when or where if specified. When there is no plan, summarize the main exchange instead.
+Rewrite the informal messages as a brief narrative. Combine repeated statements and omit greetings and small talk that do not affect the outcome.
+Summarize what each relevant participant contributes to the conversation, including any reply that changes or resolves the original request.
+Describe the most important update a reader would need after missing the chat. Include any unresolved issue that matters to the participants.
+Condense the conversation while distinguishing completed actions, confirmed plans, and tentative suggestions.
+Summarize the chat in chronological order, keeping only events and clarifications that are needed to understand the final state.
+Write a compact summary that preserves key names, commitments, and concrete details mentioned in the chat. Resolve informal references only when the dialogue makes them clear.
