@@ -1,9 +1,21 @@
 # IT4906 — Phân tích dữ liệu X-quang ngực tiếng Việt
 
-Kaggle notebook chạy full pipeline (giải thuật DE): https://www.kaggle.com/code/vohuutridung/it4906-pipeline
 HF repo: [vohuutridung/IT4906-TTTH](https://huggingface.co/datasets/vohuutridung/IT4906-TTTH)
 
-Project chứa prompt tạo báo cáo `Findings`, script tải dataset VNMedical_bv175, notebook phân tích khám phá dữ liệu và config cho các pipeline de/ga.
+Project chứa prompt tạo báo cáo `Findings`, script tải dataset VNMedical_bv175, notebook phân tích khám phá dữ liệu và các baseline tối ưu prompt.
+
+## Kaggle notebooks
+
+| Phương pháp | Notebook Kaggle | Mô tả |
+|---|---|---|
+| DE — EvoPrompt | [it4906-pipeline](https://www.kaggle.com/code/vohuutridung/it4906-pipeline) | Pipeline DE |
+| Random Search (Best-of-10) | [IT4906 Random Search](https://www.kaggle.com/code/drakan02/it4906-random-search-50-val-and-full-test) | Chấm 10 prompt trên 50 mẫu validation, chọn p*, đánh giá trên toàn bộ test |
+| Hill Climbing | [IT4906 Hill Climbing](https://www.kaggle.com/code/drakan02/it4906-hill-climbing-50-val-and-full-test) | 1 prompt khởi tạo + 9 lượt cải tiến, cùng ngân sách 10 lần chấm fitness |
+| APE | [IT4906 APE](https://www.kaggle.com/code/drakan02/it4906-ape-50-val-and-full-test) | 10 prompt ban đầu, 2 thế hệ paraphrase; 30 lần chấm fitness |
+
+Các notebook baseline dùng MedGemma 1.5 4B làm Target LLM, cùng 50 mẫu validation, fitness `0.7 × BERTScore F1 + 0.3 × ROUGE-L F1`, và đánh giá prompt đã chọn trên toàn bộ test. Mỗi notebook Kaggle có runtime dataset private riêng.
+
+README cho từng thuật toán và hướng dẫn chạy nằm cạnh runner: [RS](src/IT4906/rs/README.md), [Hill Climbing](src/IT4906/hc/README.md), [APE](src/IT4906/ape/README.md).
 
 ## Cài đặt
 
@@ -34,7 +46,7 @@ Mở `data/med_findings_gen/EDA/01_vnmedical_data_analysis.ipynb` trong Jupyter 
 
 ## Chạy DE trên Kaggle
 
-Notebook gọi `bash deployment/kaggle/run.sh --mode MODE`, với `MODE` là `setup`, `smoke`, `evolve` hoặc `evaluate`. Các cell mẫu nằm trong mục [Chạy trên Kaggle](src/IT4906/de/HANDOVER.md#chạy-trên-kaggle).
+Notebook DE gọi `bash deployment/kaggle/run.sh --mode MODE`, với `MODE` là `setup`, `smoke`, `evolve` hoặc `evaluate`. Các cell mẫu nằm trong mục [Chạy trên Kaggle](src/IT4906/de/HANDOVER.md#chạy-trên-kaggle). Hướng dẫn cho các baseline RS/HC/APE nằm trong README tương ứng ở `src/IT4906/`.
 
 ## Prompt
 
