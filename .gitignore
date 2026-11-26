@@ -224,3 +224,5 @@ data/cls/
 
 # Personal work context (never commit/push)
 /context/
+
+/deployment/
